@@ -189,68 +189,27 @@ Session::~Session() {
 
   // First, gracefully cancel all actions: they might still want to write
   // to nodes.
-  std::vector<std::shared_ptr<Action>> actions;
-  actions.reserve(actions_.size());
   for (auto& [_, action] : actions_) {
-    actions.push_back(action);
-  }
-  mu_.unlock();
-  for (const auto& action : actions) {
     if (absl::Status cancel_status = action->Cancel(); !cancel_status.ok()) {
       LOG(WARNING) << "Failed to cancel action " << action->id() << ": "
                    << cancel_status;
     }
   }
-  mu_.lock();
-  thread::CaseArray done_cases;
-  done_cases.reserve(actions.size());
-  for (const auto& action : actions) {
-    absl::StatusOr<thread::Case> done_case_or_status = action->OnDone();
-    if (!done_case_or_status.ok()) {
-      continue;
-    }
-    done_cases.push_back(*std::move(done_case_or_status));
-  }
-  size_t num_actions_done = 0;
-  const absl::Time deadline = absl::Now() + absl::Seconds(10);
-  while (absl::Now() < deadline && num_actions_done < actions.size()) {
-    mu_.unlock();
-    const int selected = thread::SelectUntil(deadline, done_cases);
-    mu_.lock();
-    if (selected == -1 && num_actions_done >= done_cases.size()) {
-      break;
-    }
-    done_cases[selected] = thread::NonSelectableCase();
-    ++num_actions_done;
-  }
-  if (absl::Now() >= deadline) {
-    LOG(WARNING) << "Timed out waiting for "
-                 << actions.size() - num_actions_done << " actions to finish.";
-  }
 
   mu_.unlock();
-  for (const auto& action : actions) {
+  for (const auto& [_, action] : actions_) {
     action->UnbindSessionInternal();
   }
-  actions_.clear();
-  actions.clear();
   mu_.lock();
-  // // Flush writers
-  // if (node_map_ != nullptr) {
-  //   node_map_->FlushAllWriters();
-  // }
 
   for (auto& [_, connection] : connections_) {
     connection->CancelHandler();
+    mu_.unlock();
+    connection->Join().IgnoreError();
+    mu_.lock();
   }
-  // for (auto& [connection_id, connection] : connections_) {
-  //   // release the lock because connection handlers may use action
-  //   // registry, node map, etc.
-  //   mu_.unlock();
-  //   connection->Join().IgnoreError();
-  //   mu_.lock();
-  //   DLOG(INFO) << "connection joined in ~Session: " << connection_id;
-  // }
+  AwaitAllActions_(absl::Seconds(5)).IgnoreError();
+  actions_.clear();
 }
 
 void Session::StartStreamHandler(std::string_view id,
@@ -301,10 +260,22 @@ absl::Status Session::DispatchWireMessage(WireMessage message,
   return DispatchWireMessageInternal(std::move(message), origin_stream);
 }
 
+absl::Status Session::AwaitAllActions(absl::Duration timeout) {
+  act::MutexLock lock(&mu_);
+  return AwaitAllActions_(timeout);
+}
+
 void Session::CancelAllActions() {
   act::MutexLock lock(&mu_);
   for (auto& [_, action] : actions_) {
     action->Cancel().IgnoreError();
+  }
+}
+
+void Session::CancelAllConnections() {
+  act::MutexLock lock(&mu_);
+  for (auto& [_, connection] : connections_) {
+    connection->CancelHandler();
   }
 }
 
@@ -338,6 +309,46 @@ absl::StatusOr<std::shared_ptr<Action>> Session::ExtractAction_(
         absl::StrCat("Action with id ", id, " not found."));
   }
   return std::move(action_it.mapped());
+}
+
+absl::Status Session::AwaitAllActions_(absl::Duration timeout) {
+  std::vector<std::shared_ptr<Action>> actions;
+  actions.reserve(actions_.size());
+  for (auto& [_, action] : actions_) {
+    actions.push_back(action);
+  }
+  thread::CaseArray done_cases;
+  done_cases.reserve(actions.size());
+  for (const auto& action : actions) {
+    absl::StatusOr<thread::Case> done_case_or_status = action->OnDone();
+    if (!done_case_or_status.ok()) {
+      continue;
+    }
+    done_cases.push_back(*std::move(done_case_or_status));
+  }
+  size_t num_actions_done = 0;
+  const absl::Time deadline = absl::Now() + timeout;
+  while (absl::Now() < deadline && num_actions_done < actions.size()) {
+    mu_.unlock();
+    const int selected = thread::SelectUntil(deadline, done_cases);
+    mu_.lock();
+    if (selected == -1 && num_actions_done >= done_cases.size()) {
+      break;
+    }
+    if (selected != -1) {
+      mu_.unlock();
+      actions[selected]->Await(deadline - absl::Now()).IgnoreError();
+      mu_.lock();
+    }
+    done_cases[selected] = thread::NonSelectableCase();
+    ++num_actions_done;
+  }
+  if (absl::Now() >= deadline) {
+    return absl::DeadlineExceededError(
+        absl::StrCat("Timed out waiting for ",
+                     actions.size() - num_actions_done, " actions to finish."));
+  }
+  return absl::OkStatus();
 }
 
 size_t Session::GetNumActiveConnections() const {

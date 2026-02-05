@@ -55,17 +55,11 @@ Service::~Service() {
   for (auto& [_, session] : sessions_) {
     session->CancelAllActions();
   }
-  const std::vector<std::unique_ptr<thread::Fiber>> fibers =
-      GatherConnectionFibers();
-  for (const auto& fiber : fibers) {
-    fiber->Cancel();
-  }
 
   bool abort_streams = false;
-  const absl::Time deadline = absl::Now() + absl::Seconds(10);
-  for (const auto& fiber : fibers) {
-    thread::SelectUntil(deadline, {fiber->OnJoinable()});
-    if (absl::Now() > deadline) {
+  absl::Time deadline = absl::Now() + absl::Seconds(10);
+  for (auto& [_, session] : sessions_) {
+    if (!session->AwaitAllActions(deadline - absl::Now()).ok()) {
       abort_streams = true;
       break;
     }
@@ -78,14 +72,10 @@ Service::~Service() {
       stream->Abort(absl::DeadlineExceededError("Service shutting down."));
     }
   }
-
-  for (const auto& fiber : fibers) {
-    mu_.unlock();
-    fiber->Join();
-    mu_.lock();
-  }
-
+  mu_.unlock();
   sessions_.clear();
+  node_maps_.clear();
+  mu_.lock();
 }
 
 WireStream* absl_nullable Service::GetStream(std::string_view stream_id) const {
@@ -193,6 +183,8 @@ StreamHandler Service::EnsureCleanupOnDone(StreamHandler handler) {
 
     const std::string stream_id = stream->GetId();
 
+    act::MutexLock lock(&mu_);
+
     const std::unique_ptr<internal::ConnectionCtx> ctx =
         session->ExtractStreamHandler(stream_id);
     if (ctx != nullptr) {
@@ -204,8 +196,7 @@ StreamHandler Service::EnsureCleanupOnDone(StreamHandler handler) {
       }
     }
 
-    act::MutexLock lock(&mu_);
-    if (session->GetNumActiveConnections() == 0) {
+    if (session->GetNumActiveConnections() == 0 && allow_new_connections_) {
       auto node_map_it = node_maps_.find(stream_to_session_.at(stream_id));
       DCHECK(node_map_it != node_maps_.end());
       node_map_it->second->FlushAllWriters();

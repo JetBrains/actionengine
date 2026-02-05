@@ -57,12 +57,14 @@ struct PyUserData {
 
     py::object empty2;
     std::swap(lock, empty2);
+    obj_refs.clear();
   }
 
   Action* absl_nonnull action = nullptr;
   thread::PermanentEvent done;
   py::object future = py::none();
   py::object lock = py::none();
+  std::vector<py::object> obj_refs;
 };
 
 class PyRaiiLock {
@@ -162,13 +164,12 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
       if (!future.ok()) {
         status = future.status();
       } else {
-        user_data.future = *future;
-        action->SetOnCancelled([future = py::handle(user_data.future)]() {
+        std::swap(*future, user_data.future);
+        future->release().dec_ref();
+        py::handle future_handle = user_data.future;
+        action->SetOnCancelled([future_handle]() {
           py::gil_scoped_acquire gil;
-          auto _ = future.attr("cancel")();
-          // py::object our_loop = future.attr("get_loop")();
-          // our_loop.attr("call_soon_threadsafe")(py::cpp_function(
-          //     [future]() { auto _ = future.attr("cancel")(); }));
+          auto _ = future_handle.attr("cancel")();
         });
         auto on_python_cancel =
             py::cpp_function([user_data = &user_data](py::handle) {
@@ -189,22 +190,27 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
                 user_data->action->Cancel().IgnoreError();
               }
             });
-        user_data.future.attr("add_done_callback")(std::move(on_python_cancel));
+        user_data.obj_refs.push_back(on_python_cancel);
         user_data.future.attr("add_done_callback")(
+            py::handle(on_python_cancel));
+        on_python_cancel.release().dec_ref();
+
+        auto on_python_done =
             py::cpp_function([action = action.get()](py::handle) {
               py::gil_scoped_acquire gil;
               if (PyUserData& user_data = EnsurePyUserData(action);
                   !user_data.done.HasBeenNotified()) {
                 user_data.done.Notify();
               }
-            }));
+            });
+        user_data.obj_refs.push_back(on_python_done);
+        user_data.future.attr("add_done_callback")(py::handle(on_python_done));
+        on_python_done.release().dec_ref();
 
         {
           py::gil_scoped_release release;
           thread::Select({user_data.done.OnEvent()});
         }
-        py::object empty;
-        std::swap(*future, empty);
       }
     } catch (py::error_already_set& e) {
       status = absl::InternalError(absl::StrCat(e.what()));

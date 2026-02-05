@@ -129,7 +129,9 @@ absl::Status ActionExecutionContext::Cancel() {
   if (!cancelled_) {
     cancelled_ = true;
     if (on_cancelled_) {
+      mu_.unlock();
       on_cancelled_();
+      mu_.lock();
     }
   }
   if (!HasBeenRun_() && !HasBeenCalled_()) {
@@ -798,7 +800,7 @@ absl::Status Action::RunInBackground(bool detach) {
     ctx_.progress_state_ = ActionRunState{
         .fiber = thread::NewTree({}, [this]() {
           const std::shared_ptr<Action> action = shared_from_this();
-          ctx_.RunHandlerWithPreparationAndCleanup(handler_, action);
+          ctx_.RunHandlerWithPreparationAndCleanup(std::move(handler_), action);
         })};
   }
 

@@ -30,7 +30,7 @@ async def main():
     action_registry = make_action_registry()
     service = actionengine.Service(action_registry)
 
-    server_identity = str(uuid.uuid4())
+    server_identity = "sttdemo"
 
     rtc_config = actionengine.webrtc.RtcConfig()
     rtc_config.preferred_port_range = (20003, 20003)

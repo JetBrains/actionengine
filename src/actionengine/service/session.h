@@ -165,7 +165,11 @@ class Session {
   absl::Status DispatchWireMessage(
       WireMessage message, WireStream* absl_nullable origin_stream = nullptr);
 
+  absl::Status AwaitAllActions(
+      absl::Duration timeout = absl::InfiniteDuration());
+
   void CancelAllActions();
+  void CancelAllConnections();
 
   size_t GetNumActiveConnections() const;
 
@@ -185,6 +189,10 @@ class Session {
                                 std::shared_ptr<Action> action);
   absl::StatusOr<std::shared_ptr<Action>> ExtractAction(std::string_view id);
   absl::StatusOr<std::shared_ptr<Action>> ExtractAction_(std::string_view id)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
+  absl::Status AwaitAllActions_(
+      absl::Duration timeout = absl::InfiniteDuration())
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   absl::Status DispatchNodeFragmentInternal(NodeFragment node_fragment)
