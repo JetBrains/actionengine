@@ -31,25 +31,6 @@ NodeMap::~NodeMap() {
   nodes_.clear();
 }
 
-NodeMap::NodeMap(NodeMap&& other) noexcept {
-  act::MutexLock lock(&other.mu_);
-
-  nodes_ = std::move(other.nodes_);
-  chunk_store_factory_ = std::move(other.chunk_store_factory_);
-}
-
-NodeMap& NodeMap::operator=(NodeMap&& other) noexcept {
-  if (this == &other) {
-    return *this;
-  }
-
-  concurrency::TwoMutexLock lock(&mu_, &other.mu_);
-  nodes_ = std::move(other.nodes_);
-  chunk_store_factory_ = std::move(other.chunk_store_factory_);
-
-  return *this;
-}
-
 AsyncNode* absl_nonnull NodeMap::Get(
     std::string_view id, const ChunkStoreFactory& chunk_store_factory) {
   act::MutexLock lock(&mu_);
@@ -80,12 +61,6 @@ std::shared_ptr<AsyncNode> NodeMap::Extract(std::string_view id) {
 
 std::shared_ptr<AsyncNode> NodeMap::operator[](std::string_view id) {
   return Borrow(id);
-}
-
-AsyncNode& NodeMap::insert(std::string_view id, AsyncNode&& node) {
-  act::MutexLock lock(&mu_);
-  nodes_[id] = std::make_unique<AsyncNode>(std::move(node));
-  return *nodes_[id];
 }
 
 bool NodeMap::contains(std::string_view id) const {

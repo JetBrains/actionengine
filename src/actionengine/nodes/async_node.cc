@@ -44,38 +44,6 @@ AsyncNode::AsyncNode(std::string_view id, NodeMap* absl_nullable node_map,
   chunk_store_->SetId(id).IgnoreError();
 }
 
-AsyncNode::AsyncNode(AsyncNode&& other) noexcept {
-  act::MutexLock lock(&other.mu_);
-  node_map_ = other.node_map_;
-  chunk_store_ = std::move(other.chunk_store_);
-  default_reader_ = std::move(other.default_reader_);
-  default_writer_ = std::move(other.default_writer_);
-  other.node_map_ = nullptr;
-  other.chunk_store_ = nullptr;
-  other.default_reader_ = nullptr;
-  other.default_writer_ = nullptr;
-}
-
-AsyncNode& AsyncNode::operator=(AsyncNode&& other) noexcept {
-  if (this == &other) {
-    return *this;
-  }
-
-  concurrency::TwoMutexLock lock(&mu_, &other.mu_);
-
-  node_map_ = other.node_map_;
-  chunk_store_ = std::move(other.chunk_store_);
-  default_reader_ = std::move(other.default_reader_);
-  default_writer_ = std::move(other.default_writer_);
-
-  other.node_map_ = nullptr;
-  other.chunk_store_ = nullptr;
-  other.default_reader_ = nullptr;
-  other.default_writer_ = nullptr;
-
-  return *this;
-}
-
 AsyncNode::~AsyncNode() {
   act::MutexLock lock(&mu_);
   if (default_reader_ != nullptr) {

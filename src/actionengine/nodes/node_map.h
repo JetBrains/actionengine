@@ -56,14 +56,9 @@ class NodeMap {
 
   ~NodeMap();
 
-  // This class cannot be copied as each AsyncNode contains non-trivial state
-  // that cannot be duplicated safely.
+  // This class cannot be copied or moved.
   NodeMap(const NodeMap& other) = delete;
   NodeMap& operator=(const NodeMap& other) = delete;
-
-  // NodeMap can be safely moved by value.
-  NodeMap(NodeMap&& other) noexcept;
-  NodeMap& operator=(NodeMap&& other) noexcept;
 
   void CancelAllReaders() {
     act::MutexLock lock(&mu_);
@@ -87,7 +82,6 @@ class NodeMap {
 
   [[nodiscard]] std::shared_ptr<AsyncNode> Extract(std::string_view id);
 
-  AsyncNode& insert(std::string_view id, AsyncNode&& node);
   bool contains(std::string_view id) const;
 
  private:

@@ -84,14 +84,9 @@ class AsyncNode {
                      NodeMap* absl_nullable node_map = nullptr,
                      std::unique_ptr<ChunkStore> chunk_store = nullptr);
 
-  // This class cannot be copied as each AsyncNode contains non-trivial state
-  // that cannot be shared between copies, such as reader and writer fibers.
+  // This class cannot be copied or moved.
   AsyncNode(AsyncNode& other) = delete;
   AsyncNode& operator=(AsyncNode& other) = delete;
-
-  // AsyncNode objects can be moved by value.
-  AsyncNode(AsyncNode&& other) noexcept;
-  AsyncNode& operator=(AsyncNode&& other) noexcept;
 
   ~AsyncNode();
 
