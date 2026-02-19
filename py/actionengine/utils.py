@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 The Action Engine Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ def is_null_chunk(chunk: data.Chunk) -> bool:
     if chunk is None:
         return False
     return (
-        not chunk.data and chunk.metadata.mimetype == "application/octet-stream"
+            not chunk.data and chunk.metadata.mimetype == "application/octet-stream"
     )
 
 
@@ -34,7 +34,7 @@ def wrap_pybind_object(cls: type[T], impl: U) -> T:
     wrapped = cls.__new__(cls)
     super(cls, wrapped).__init__(impl)
     if add_python_specific_attributes := getattr(
-        cls, "_add_python_specific_attributes", None
+            cls, "_add_python_specific_attributes", None
     ):
         add_python_specific_attributes(wrapped)
     return wrapped

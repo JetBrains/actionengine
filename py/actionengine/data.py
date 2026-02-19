@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 The Action Engine Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,35 +42,35 @@ class SerializerRegistry(_C.data.SerializerRegistry):
 
 
 def to_bytes(
-    obj: Any,
-    mimetype: str = "",
-    registry: SerializerRegistry = None,
+        obj: Any,
+        mimetype: str = "",
+        registry: SerializerRegistry = None,
 ) -> bytes:
     return _C.data.to_bytes(obj, mimetype, registry)
 
 
 def to_chunk(
-    obj: Any,
-    mimetype: str = "",
-    registry: SerializerRegistry = None,
+        obj: Any,
+        mimetype: str = "",
+        registry: SerializerRegistry = None,
 ) -> Chunk:
     if isinstance(obj, NodeFragment) and mimetype in (
-        "",
-        "__act:NodeFragment__",
+            "",
+            "__act:NodeFragment__",
     ):
         return _C.data.to_chunk(obj)
     if isinstance(obj, status.Status) and mimetype in (
-        "",
-        "__status__",
+            "",
+            "__status__",
     ):
         return _C.data.to_chunk(obj)
     return _C.data.to_chunk(obj, mimetype, registry)
 
 
 def from_chunk(
-    chunk: Chunk,
-    mimetype: str = "",
-    registry: SerializerRegistry | None = None,
+        chunk: Chunk,
+        mimetype: str = "",
+        registry: SerializerRegistry | None = None,
 ) -> bytes:
     return _C.data.from_chunk(chunk, mimetype, registry)
 

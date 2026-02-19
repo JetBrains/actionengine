@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 The Action Engine Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,9 +30,9 @@ class Session(_C.service.Session):
     """A Pythonic wrapper for the raw pybind11 Session bindings."""
 
     def __init__(
-        self,
-        node_map: _C.nodes.NodeMap | None = None,
-        action_registry: _C.actions.ActionRegistry | None = None,
+            self,
+            node_map: _C.nodes.NodeMap | None = None,
+            action_registry: _C.actions.ActionRegistry | None = None,
     ):
         """Constructor for Session."""
 
@@ -53,9 +53,9 @@ class Session(_C.service.Session):
         )
 
     async def dispatch_wire_message(
-        self,
-        message: data.WireMessage,
-        stream: _C.service.WireStream,
+            self,
+            message: data.WireMessage,
+            stream: _C.service.WireStream,
     ):
         """Dispatches a message to the session."""
         return await asyncio.to_thread(

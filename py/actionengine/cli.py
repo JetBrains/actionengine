@@ -1,3 +1,17 @@
+# Copyright 2026 The Action Engine Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import argparse
 import asyncio
 import importlib
@@ -7,7 +21,6 @@ import sys
 
 import actionengine
 import requests
-
 
 API_ROOT = "https://actionengine.dev/api"
 
@@ -27,10 +40,10 @@ async def sleep_forever():
 
 
 async def serve(
-    registry: actionengine.ActionRegistry,
-    host: str,
-    api_key: str,
-    timed_token: str,
+        registry: actionengine.ActionRegistry,
+        host: str,
+        api_key: str,
+        timed_token: str,
 ):
     service = actionengine.Service(registry)
     rtc_config = actionengine.webrtc.RtcConfig()
@@ -104,7 +117,7 @@ async def serve_command(args: argparse.Namespace):
                 raise
 
             spec = importlib_util.spec_from_file_location(
-                f"user_registry_module_{abs(hash(str(location)))%10_000}",
+                f"user_registry_module_{abs(hash(str(location))) % 10_000}",
                 str(location),
             )
             if spec is None or spec.loader is None:
@@ -259,7 +272,7 @@ def parse_args() -> argparse.Namespace:
         "--registry",
         type=str,
         help="The action registry to host. This should be an importable "
-        "path of a symbol in a Python module.",
+             "path of a symbol in a Python module.",
     )
     return parser.parse_args()
 

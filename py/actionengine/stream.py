@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 The Action Engine Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ ReceiveFn = SyncReceiveFn | AsyncReceiveFn
 
 
 def _wrap_handler(
-    handler: SyncFn | AsyncFn,
+        handler: SyncFn | AsyncFn,
 ) -> AsyncFn:
     if inspect.iscoroutinefunction(handler):
         return handler
@@ -64,7 +64,7 @@ class WireStream(_C.service.WireStream):
         ...
 
     async def receive(
-        self, timeout: float = -1.0
+            self, timeout: float = -1.0
     ) -> Optional[data.WireMessage]:
         """Receives a message from the stream."""
         ...
@@ -145,10 +145,10 @@ class WireStreamAdapter(WireStream):
     _recv_task: asyncio.Task | None
 
     def __init__(
-        self,
-        send: SendFn,
-        receive: ReceiveFn,
-        stream_id: str = "",
+            self,
+            send: SendFn,
+            receive: ReceiveFn,
+            stream_id: str = "",
     ):
         super().__init__()
         self._send = _wrap_handler(send)

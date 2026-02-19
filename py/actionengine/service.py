@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 The Action Engine Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ from actionengine import utils
 Session = eg_session.Session
 WireStream = eg_stream.WireStream
 
-
 AsyncConnectionHandler = Callable[
     [_C.service.WireStream, Session, float], Coroutine[None, None, None]
 ]
@@ -37,15 +36,15 @@ ConnectionHandler = SyncConnectionHandler | AsyncConnectionHandler
 
 
 def wrap_async_handler(
-    handler: AsyncConnectionHandler,
+        handler: AsyncConnectionHandler,
 ) -> SyncConnectionHandler:
     """Wraps the given handler to run in the event loop."""
     loop = asyncio.get_running_loop()
 
     def sync_handler(
-        stream: _C.service.WireStream,
-        session: Session,
-        recv_timeout: float = -1.0,
+            stream: _C.service.WireStream,
+            session: Session,
+            recv_timeout: float = -1.0,
     ) -> None:
         result = asyncio.run_coroutine_threadsafe(
             handler(
@@ -62,9 +61,9 @@ def wrap_async_handler(
 
 def wrap_sync_handler(handler: SyncConnectionHandler) -> SyncConnectionHandler:
     def sync_handler(
-        stream: _C.service.WireStream,
-        session: Session,
-        recv_timeout: float = -1.0,
+            stream: _C.service.WireStream,
+            session: Session,
+            recv_timeout: float = -1.0,
     ) -> None:
         return handler(
             stream,
@@ -88,8 +87,8 @@ class Service(_C.service.Service):
     """A Pythonic wrapper for the raw pybind11 Service bindings."""
 
     def __init__(
-        self,
-        action_registry: actions.ActionRegistry,
-        connection_handler: ConnectionHandler | None = None,
+            self,
+            action_registry: actions.ActionRegistry,
+            connection_handler: ConnectionHandler | None = None,
     ):
         super().__init__(action_registry, wrap_handler(connection_handler))

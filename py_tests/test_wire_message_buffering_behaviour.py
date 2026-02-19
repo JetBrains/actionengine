@@ -1,3 +1,17 @@
+# Copyright 2026 The Action Engine Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import asyncio
 import uuid
 
@@ -21,16 +35,15 @@ def make_node_fragment(idx: int) -> actionengine.NodeFragment:
 
 
 def make_webrtc_server_with_handler(
-    handler,
-    server_identity: str,
-    preferred_port: int,
-    run: bool = False,
+        handler,
+        server_identity: str,
+        preferred_port: int,
+        run: bool = False,
 ) -> tuple[
     actionengine.ActionRegistry,
     actionengine.Service,
     actionengine.webrtc.WebRtcServer,
 ]:
-
     action_registry = actionengine.ActionRegistry()
     service = actionengine.Service(action_registry, handler)
 
@@ -51,9 +64,9 @@ def make_webrtc_server_with_handler(
 
 
 async def handle_connection_for_test_buffering_works(
-    stream: actionengine._C.webrtc.WebRtcWireStream,
-    _: actionengine.Session,
-    recv_timeout: float = -1.0,
+        stream: actionengine._C.webrtc.WebRtcWireStream,
+        _: actionengine.Session,
+        recv_timeout: float = -1.0,
 ):
     received = await asyncio.to_thread(stream.receive, recv_timeout)
     assert received is None  # half-closed without messages
@@ -121,9 +134,9 @@ async def test_buffering_works():
 
 
 async def handle_connection_for_test_force_flush_works(
-    stream: actionengine._C.webrtc.WebRtcWireStream,
-    _: actionengine.Session,
-    recv_timeout: float = -1.0,
+        stream: actionengine._C.webrtc.WebRtcWireStream,
+        _: actionengine.Session,
+        recv_timeout: float = -1.0,
 ):
     received = await asyncio.to_thread(stream.receive, recv_timeout)
     assert received is None  # half-closed without messages
@@ -188,9 +201,9 @@ async def test_force_flush_works():
 
 
 async def handle_connection_for_test_half_close_works_with_buffering(
-    stream: actionengine._C.webrtc.WebRtcWireStream,
-    _: actionengine.Session,
-    recv_timeout: float = -1.0,
+        stream: actionengine._C.webrtc.WebRtcWireStream,
+        _: actionengine.Session,
+        recv_timeout: float = -1.0,
 ):
     received = await asyncio.to_thread(stream.receive, recv_timeout)
     assert received is None  # half-closed without messages
@@ -243,9 +256,9 @@ async def test_half_close_works_with_buffering():
 
 
 async def handle_connection_for_test_headers(
-    stream: actionengine._C.webrtc.WebRtcWireStream,
-    _: actionengine.Session,
-    recv_timeout: float = -1.0,
+        stream: actionengine._C.webrtc.WebRtcWireStream,
+        _: actionengine.Session,
+        recv_timeout: float = -1.0,
 ):
     with actionengine.buffer_wire_messages(stream):
         wire_message_1 = actionengine.WireMessage()

@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 The Action Engine Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -88,9 +88,9 @@ def packb_with_basic_collections(obj: Any, **kwargs):
     return ormsgpack.packb(
         obj,
         option=(
-            ormsgpack.OPT_SERIALIZE_NUMPY
-            | ormsgpack.OPT_SERIALIZE_PYDANTIC
-            | ormsgpack.OPT_UTC_Z
+                ormsgpack.OPT_SERIALIZE_NUMPY
+                | ormsgpack.OPT_SERIALIZE_PYDANTIC
+                | ormsgpack.OPT_UTC_Z
         ),
         **kwargs,
     )
@@ -111,7 +111,7 @@ def _numpy_outer_type_to_dtype(outer_type: Any) -> np.dtype | None:
 
 
 def _deserialize_unpacked_numpy(
-    data: list, model: Optional[type[np.ndarray] | types.GenericAlias] = None
+        data: list, model: Optional[type[np.ndarray] | types.GenericAlias] = None
 ):
     if issubclass(model, np.ndarray):
         dtype = np.uint8
@@ -130,9 +130,9 @@ PYDANTIC_SPECIAL_NAMES = {
 
 
 def _coerce_elements_of_basic_collections(
-    unpacked: list | dict | tuple | set,
-    model: type | BaseModel | None,
-    validate: bool = True,
+        unpacked: list | dict | tuple | set,
+        model: type | BaseModel | None,
+        validate: bool = True,
 ):
     model_origin = typing.get_origin(model)
     if model_origin is None:
@@ -198,10 +198,10 @@ def _coerce_elements_of_basic_collections(
 
 
 def deserialize_unpacked(
-    unpacked,
-    model: type | BaseModel | None = None,
-    validate: bool = True,
-    required: bool = True,
+        unpacked,
+        model: type | BaseModel | None = None,
+        validate: bool = True,
+        required: bool = True,
 ):
     if model is None:
         return unpacked
@@ -283,9 +283,9 @@ def deserialize_unpacked(
 
 
 def unpackb(
-    data: bytes,
-    model: type | BaseModel | None = None,
-    option: int | None = None,
+        data: bytes,
+        model: type | BaseModel | None = None,
+        option: int | None = None,
 ):
     unpacked = ormsgpack.unpackb(data, option=option)
     return deserialize_unpacked(unpacked, model)

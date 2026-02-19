@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2026 The Action Engine Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -64,12 +64,12 @@ class ActionSchema(_C.actions.ActionSchema):
 
     # pylint: disable-next=[useless-parent-delegation]
     def __init__(
-        self,
-        *,
-        name: str = "",
-        inputs: list[tuple[str, str | type[BaseModel]]],
-        outputs: list[tuple[str, str | type[BaseModel]]],
-        description: str = "",
+            self,
+            *,
+            name: str = "",
+            inputs: list[tuple[str, str | type[BaseModel]]],
+            outputs: list[tuple[str, str | type[BaseModel]]],
+            description: str = "",
     ):
         """Constructor for ActionSchema.
 
@@ -101,10 +101,10 @@ class ActionRegistry(_C.actions.ActionRegistry):
     """A Pythonic wrapper for the raw pybind11 ActionRegistry bindings."""
 
     def register(
-        self,
-        name: str,
-        schema: _C.actions.ActionSchema,
-        handler: Any = do_nothing,
+            self,
+            name: str,
+            schema: _C.actions.ActionSchema,
+            handler: Any = do_nothing,
     ) -> None:
         """Registers an action schema and handler."""
 
@@ -114,7 +114,7 @@ class ActionRegistry(_C.actions.ActionRegistry):
 
     # pylint: disable-next=[useless-parent-delegation]
     def make_action_message(
-        self, name: str, action_id: str
+            self, name: str, action_id: str
     ) -> data.ActionMessage:
         """Creates an action message.
 
@@ -128,13 +128,13 @@ class ActionRegistry(_C.actions.ActionRegistry):
         return super().make_action_message(name, action_id)
 
     def make_action(
-        self,
-        name: str,
-        action_id: str = "",
-        *,
-        node_map: NodeMap | None = None,
-        stream: _C.service.WireStream | None = None,
-        session: _C.service.Session | None = None,
+            self,
+            name: str,
+            action_id: str = "",
+            *,
+            node_map: NodeMap | None = None,
+            stream: _C.service.WireStream | None = None,
+            session: _C.service.Session | None = None,
     ) -> "Action":
         """Creates an action."""
 
@@ -161,8 +161,8 @@ class Action(_C.actions.Action):
 
     @staticmethod
     def from_schema(
-        schema: ActionSchema,
-        action_id: str = "",
+            schema: ActionSchema,
+            action_id: str = "",
     ):
         """Creates an action from a schema."""
         return utils.wrap_pybind_object(
@@ -179,13 +179,13 @@ class Action(_C.actions.Action):
         return await asyncio.to_thread(super().wait_until_complete)
 
     async def call(
-        self, wire_message_headers: dict[str, bytes] | None = None
+            self, wire_message_headers: dict[str, bytes] | None = None
     ) -> None:
         """Calls the action by sending the action message to the stream."""
         await asyncio.to_thread(self.call_sync, wire_message_headers)
 
     async def call_and_wait_for_dispatch_status(
-        self, wire_message_headers: dict[str, bytes] | None = None
+            self, wire_message_headers: dict[str, bytes] | None = None
     ) -> None:
         """Calls the action and waits for the dispatch status."""
         await asyncio.to_thread(
@@ -194,15 +194,15 @@ class Action(_C.actions.Action):
         )
 
     def call_sync(
-        self,
-        wire_message_headers: dict[str, bytes] | None = None,
+            self,
+            wire_message_headers: dict[str, bytes] | None = None,
     ) -> None:
         """Calls the action by sending the action message to the stream."""
         super().call(wire_message_headers)
 
     def call_and_wait_for_dispatch_status_sync(
-        self,
-        wire_message_headers: dict[str, bytes] | None = None,
+            self,
+            wire_message_headers: dict[str, bytes] | None = None,
     ) -> None:
         """Calls the action and waits for the dispatch status synchronously."""
         super().call_and_wait_for_dispatch_status(wire_message_headers)
@@ -223,7 +223,7 @@ class Action(_C.actions.Action):
         return utils.wrap_pybind_object(NodeMap, super().get_node_map())
 
     def get_input(
-        self, name: str, bind_stream: bool | None = None
+            self, name: str, bind_stream: bool | None = None
     ) -> AsyncNode:
         """Returns the input node with the given name.
 
@@ -242,7 +242,7 @@ class Action(_C.actions.Action):
         )
 
     def get_output(
-        self, name: str, bind_stream: bool | None = None
+            self, name: str, bind_stream: bool | None = None
     ) -> AsyncNode:
         """Returns the output node with the given name.
 
@@ -280,7 +280,7 @@ class Action(_C.actions.Action):
         return utils.wrap_pybind_object(AsyncNode, node)
 
     def make_action_in_same_session(
-        self, name: str, action_id: str = ""
+            self, name: str, action_id: str = ""
     ) -> "Action":
         """Creates an action in the same session."""
         return utils.wrap_pybind_object(
