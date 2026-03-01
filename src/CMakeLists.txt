@@ -122,8 +122,7 @@ target_link_libraries(
         act::nodes::pybind11
         act::net::webrtc
         act::net::webrtc::pybind11
-        act::net::websockets
-        act::net::websockets::pybind11
+        act::net::http::websockets::pybind11
         act::redis
         act::redis::pybind11
         act::util::pybind11

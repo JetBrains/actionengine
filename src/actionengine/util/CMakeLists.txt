@@ -18,7 +18,6 @@ target_link_libraries(
         actUtilBoostAsio PRIVATE
         absl::base
         act::concurrency
-        Boost::beast
 )
 # --------------------------------------------------------------------------
 add_library(

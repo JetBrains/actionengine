@@ -190,10 +190,12 @@ Session::~Session() {
   // First, gracefully cancel all actions: they might still want to write
   // to nodes.
   for (auto& [_, action] : actions_) {
+    mu_.unlock();
     if (absl::Status cancel_status = action->Cancel(); !cancel_status.ok()) {
       LOG(WARNING) << "Failed to cancel action " << action->id() << ": "
                    << cancel_status;
     }
+    mu_.lock();
   }
 
   mu_.unlock();
@@ -209,7 +211,9 @@ Session::~Session() {
     mu_.lock();
   }
   AwaitAllActions_(absl::Seconds(5)).IgnoreError();
+  mu_.unlock();
   actions_.clear();
+  mu_.lock();
 }
 
 void Session::StartStreamHandler(std::string_view id,

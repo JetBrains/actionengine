@@ -55,7 +55,9 @@ WebRtcServer::WebRtcServer(act::Service* service, std::string_view address,
       signalling_identity_(signalling_identity),
       rtc_config_(std::move(rtc_config)),
       signalling_use_ssl_(signalling_url.scheme == "wss"),
-      ready_data_connections_(32) {}
+      ready_data_connections_(32) {
+  InitSctpSettings();
+}
 
 WebRtcServer::WebRtcServer(act::Service* service, std::string_view address,
                            std::string_view signalling_identity,
@@ -278,10 +280,13 @@ void WebRtcServer::RunLoop() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
         LOG(ERROR) << "WebRtcServer failed to connect to "
                       "signalling server: "
                    << connect_status;
+        signalling_client->ResetCallbacks();
+        signalling_client->Cancel();
         mu_.unlock();
-        act::SleepFor(absl::Seconds(0.5));
+        signalling_client->Join();  // Wait for the old client to actually stop
         mu_.lock();
         signalling_client = nullptr;
+        act::SleepFor(absl::Seconds(0.5));
         --retries_remaining;
         continue;
       }

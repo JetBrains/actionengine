@@ -16,11 +16,42 @@
 
 #define BOOST_ASIO_NO_DEPRECATED
 
+#include <string>
+
+#include <absl/debugging/stacktrace.h>
+#include <absl/debugging/symbolize.h>
 #include <boost/fiber/condition_variable.hpp>
 #include <boost/fiber/mutex.hpp>
 #include <boost/system/system_error.hpp>
 
 #include "thread/fiber.h"
+
+std::string GetCurrentStackTrace() {
+  void* trace[20];
+  int trace_size = 0;
+  // Capture up to 10 frames, skipping the current function frame (skip_count=1)
+  trace_size = absl::GetStackTrace(trace, 20, 1);
+
+  std::string result;
+  result += "[] Execution path: " + std::to_string(trace_size) + " frames\n";
+  for (int i = 0; i < trace_size; ++i) {
+    char buffer[1024];
+    // Symbolize each program counter to a human-readable string
+    if (absl::Symbolize(trace[i], buffer, sizeof(buffer))) {
+      result += "[] ";
+      result += buffer;
+      result += "\n";
+    } else {
+      // If symbolization fails, print the raw address
+      char addr_buffer[32];
+      snprintf(addr_buffer, sizeof(addr_buffer), "%p", trace[i]);
+      result += "[] ";
+      result += addr_buffer;
+      result += "\n";
+    }
+  }
+  return result;
+}
 
 namespace act::concurrency::impl {
 void Mutex::Lock() noexcept ABSL_EXCLUSIVE_LOCK_FUNCTION() {

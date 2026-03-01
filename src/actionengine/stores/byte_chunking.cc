@@ -52,7 +52,7 @@ static absl::InlinedVector<Byte, 8> NumberToLEBytes(T number) {
   return bytes;
 }
 
-absl::StatusOr<BytePacket> ParseBytePacket(Byte* data, size_t size) {
+absl::StatusOr<BytePacket> ParseBytePacket(const Byte* data, size_t size) {
   if (size < sizeof(uint64_t) + 1) {
     return absl::InvalidArgumentError(
         "BytePacket data size is less than 9 bytes. No valid packet "
@@ -121,19 +121,23 @@ absl::StatusOr<BytePacket> ParseBytePacket(Byte* data, size_t size) {
       "WebRtcActionEnginePacket type is not supported");
 }
 
-std::vector<BytePacket> SplitBytesIntoPackets(const std::vector<Byte>& data,
+std::vector<BytePacket> SplitBytesIntoPackets(const Byte* data, size_t size,
                                               uint64_t transient_id,
                                               uint64_t packet_size) {
   std::vector<BytePacket> packets;
 
-  if (data.size() <= packet_size - sizeof(uint64_t) - 1) {
+  if (size <= packet_size - sizeof(uint64_t) - 1) {
     // If the data fits into a single packet, create a plain wire message.
-    packets.emplace_back(CompleteBytesPacket{.serialized_message = data,
-                                             .transient_id = transient_id});
+    std::vector<Byte> message;
+    message.reserve(size);
+    message.assign(data, data + size);
+    packets.emplace_back(
+        CompleteBytesPacket{.serialized_message = std::move(message),
+                            .transient_id = transient_id});
     return packets;
   }
 
-  packets.reserve((data.size() + packet_size - 1) / packet_size);
+  packets.reserve((size + packet_size - 1) / packet_size);
 
   if (packet_size < 18) {
     LOG(FATAL) << "Packet size must be at least 18 bytes to accommodate the "
@@ -144,7 +148,7 @@ std::vector<BytePacket> SplitBytesIntoPackets(const std::vector<Byte>& data,
   // If the data is larger than the packet size, split it into chunks.
   const uint64_t first_chunk_size = packet_size - 17;
   LengthSuffixedByteChunkPacket first_chunk{
-      .chunk = std::vector(data.begin(), data.begin() + first_chunk_size),
+      .chunk = std::vector(data, data + first_chunk_size),
       .length = 0,  // This will be set later.
       .seq = 0,
       .transient_id = transient_id};
@@ -152,12 +156,11 @@ std::vector<BytePacket> SplitBytesIntoPackets(const std::vector<Byte>& data,
 
   uint32_t seq = 1;
   uint64_t offset = first_chunk_size;
-  while (offset < data.size()) {
-    uint64_t remaining_size = static_cast<uint64_t>(data.size()) - offset;
+  while (offset < size) {
+    uint64_t remaining_size = static_cast<uint64_t>(size) - offset;
     const uint64_t chunk_size = std::min(packet_size - 13, remaining_size);
     ByteChunkPacket chunk{
-        .chunk = std::vector(data.begin() + offset,
-                             data.begin() + offset + chunk_size),
+        .chunk = std::vector(data + offset, data + offset + chunk_size),
         .seq = seq,
         .transient_id = transient_id};
 
@@ -170,6 +173,13 @@ std::vector<BytePacket> SplitBytesIntoPackets(const std::vector<Byte>& data,
       static_cast<uint32_t>(packets.size());
 
   return packets;
+}
+
+std::vector<BytePacket> SplitBytesIntoPackets(const std::vector<Byte>& data,
+                                              uint64_t transient_id,
+                                              uint64_t packet_size) {
+  return SplitBytesIntoPackets(data.data(), data.size(), transient_id,
+                               packet_size);
 }
 
 uint64_t GetTransientIdFromPacket(const BytePacket& packet) {
@@ -442,6 +452,64 @@ BytePacket ProducePacket(std::vector<Byte>::const_iterator it,
   return ByteChunkPacket{.chunk = std::vector(it, it + chunk_size),
                          .seq = seq,
                          .transient_id = transient_id};
+}
+
+ByteSplittingCodec::ByteSplittingCodec(
+    std::function<absl::Status(const uint8_t*, size_t)> write_bytes,
+    size_t split_size)
+    : write_bytes_(std::move(write_bytes)), split_size_(split_size) {}
+
+absl::Status ByteSplittingCodec::Write(std::string_view data) {
+  return Write(data.data(), data.size());
+}
+
+absl::Status ByteSplittingCodec::Write(const char* data, size_t len) {
+  return Write(reinterpret_cast<const uint8_t*>(data), len);
+}
+
+absl::Status ByteSplittingCodec::Write(const uint8_t* data, size_t len) {
+  const uint64_t transient_id = next_transient_message_id_++;
+  std::vector<data::BytePacket> packets =
+      data::SplitBytesIntoPackets(data, len, transient_id, split_size_);
+  std::vector<std::vector<uint8_t>> serialized_packets;
+  serialized_packets.reserve(packets.size());
+  for (auto& packet : packets) {
+    serialized_packets.push_back(data::SerializeBytePacket(packet));
+    packet = std::monostate();
+  }
+  for (const auto& serialized_packet : serialized_packets) {
+    if (absl::Status status =
+            write_bytes_(serialized_packet.data(), serialized_packet.size());
+        !status.ok()) {
+      return status;
+    }
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::optional<std::vector<uint8_t>>>
+ByteSplittingCodec::FeedIncomingPacket(const char* data, size_t len) {
+  return FeedIncomingPacket(reinterpret_cast<const uint8_t*>(data), len);
+}
+
+absl::StatusOr<std::optional<std::vector<uint8_t>>>
+ByteSplittingCodec::FeedIncomingPacket(const uint8_t* data, size_t len) {
+  ASSIGN_OR_RETURN(data::BytePacket packet, data::ParseBytePacket(data, len));
+  const uint64_t transient_id = data::GetTransientIdFromPacket(packet);
+  data::ChunkedBytes* chunked_message = nullptr;
+  {
+    act::MutexLock lock(&mu_);
+    if (!chunked_messages_.contains(transient_id)) {
+      chunked_messages_[transient_id] = std::make_unique<data::ChunkedBytes>();
+    }
+    chunked_message = chunked_messages_[transient_id].get();
+  }
+  ASSIGN_OR_RETURN(const bool got_full_message,
+                   chunked_message->FeedPacket(std::move(packet)));
+  if (!got_full_message) {
+    return std::nullopt;
+  }
+  return chunked_message->ConsumeCompleteBytes();
 }
 
 }  // namespace act::data

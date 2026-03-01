@@ -13,8 +13,6 @@
 // ------------------------------------------------------------------------------
 
 #include <algorithm>
-#include <cctype>
-#include <cstdint>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -26,15 +24,14 @@
 #include <absl/flags/flag.h>
 #include <absl/flags/parse.h>
 #include <absl/log/check.h>
-#include <absl/log/log.h>
 #include <absl/random/distributions.h>
 #include <absl/random/random.h>
 #include <absl/strings/match.h>
 #include <absl/strings/str_split.h>
 #include <actionengine/actions/action.h>
 #include <actionengine/data/types.h>
-#include <actionengine/net/websockets/server.h>
-#include <actionengine/net/websockets/wire_stream.h>
+#include <actionengine/net/http/proxygen/server.h>
+#include <actionengine/net/http/proxygen/wire_stream.h>
 #include <actionengine/service/service.h>
 #include <actionengine/util/status_macros.h>
 
@@ -128,15 +125,16 @@ absl::Status Main(int argc, char** argv) {
   auto action_registry = MakeActionRegistry();
 
   act::Service service(&action_registry);
-  act::net::WebsocketServer server(&service, "0.0.0.0", port);
+  act::net::http::WebsocketServer server(&service, "localhost", port);
   server.Run();
 
   act::NodeMap node_map;
   act::Session session;
   session.set_node_map(&node_map);
   session.set_action_registry(action_registry);
-  ASSIGN_OR_RETURN(std::shared_ptr<act::WireStream> stream,
-                   act::net::MakeWebsocketWireStream("localhost", port));
+  ASSIGN_OR_RETURN(
+      std::shared_ptr<act::WireStream> stream,
+      act::net::http::WebsocketWireStream::Connect("http://localhost:20000/"));
 
   RETURN_IF_ERROR(stream->Start());
   session.StartStreamHandler(stream->GetId(), stream);
@@ -178,8 +176,9 @@ absl::Status Main(int argc, char** argv) {
   }
 
   stream->HalfClose();
+  act::SleepFor(absl::Seconds(0.1));
 
-  RETURN_IF_ERROR(server.Cancel());
+  server.Cancel();
   RETURN_IF_ERROR(server.Join());
 
   return absl::OkStatus();

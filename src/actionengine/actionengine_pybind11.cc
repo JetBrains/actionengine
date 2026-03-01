@@ -18,15 +18,14 @@
 #include <absl/debugging/failure_signal_handler.h>
 #include <pybind11/cast.h>
 #include <pybind11/detail/common.h>
-#include <pybind11/detail/descr.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <pybind11_abseil/check_status_module_imported.h>
 
 #include "actionengine/actions/actions_pybind11.h"
 #include "actionengine/data/data_pybind11.h"
+#include "actionengine/net/http/websockets_pybind11.h"
 #include "actionengine/net/webrtc/webrtc_pybind11.h"
-#include "actionengine/net/websockets/websockets_pybind11.h"
 #include "actionengine/nodes/nodes_pybind11.h"
 #include "actionengine/redis/chunk_store_pybind11.h"
 #include "actionengine/service/service_pybind11.h"

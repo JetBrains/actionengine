@@ -50,12 +50,7 @@ for f in build/src/actionengine_pybind11*.so; do
     if [[ "$(uname)" == "Darwin" && $(is_true "${use_rpath_env}") == "1" ]]; then
         echo "Adjusting dylib paths for $dst_path"
         python_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-        python "$repo_root/build_py/macos_patch_dylib_path.py" "$dst_path"  "libpython${python_version}.dylib" "@rpath" --ignore-errors
-        python "$repo_root/build_py/macos_patch_dylib_path.py" "$dst_path"  "libpython3.dylib" "@rpath" --ignore-errors
-        python "$repo_root/build_py/macos_patch_dylib_path.py" "$dst_path"  "libssl.3.dylib" "@rpath" --ignore-errors
-        python "$repo_root/build_py/macos_patch_dylib_path.py" "$dst_path"  "libssl.dylib" "@rpath" --ignore-errors
-        python "$repo_root/build_py/macos_patch_dylib_path.py" "$dst_path"  "libcrypto.3.dylib" "@rpath" --ignore-errors
-        python "$repo_root/build_py/macos_patch_dylib_path.py" "$dst_path"  "libcrypto.dylib" "@rpath" --ignore-errors
+        $repo_root/scripts/patch_rpath.sh "$dst_path"
     fi
 done
 for f in build/src/actionengine/proto/*_pb2.py; do

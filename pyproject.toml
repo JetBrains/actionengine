@@ -1,6 +1,6 @@
 [project]
 name = "action-engine"
-version = "0.4.0"
+version = "0.4.1"
 
 authors = [{ name = "Helena Pankov", email = "helenapankov@google.com" }]
 description = "Action Engine"

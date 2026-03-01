@@ -133,7 +133,6 @@ absl::Status Service::StartStreamHandler(std::shared_ptr<WireStream> stream,
         absl::StrCat("Stream ", stream_id, " is already connected."));
   }
 
-  WireStream* absl_nonnull stream_ptr = stream.get();
   streams_.emplace(stream_id, std::move(stream));
 
   if (!sessions_.contains(session_id)) {
@@ -157,10 +156,6 @@ absl::Status Service::StartStreamHandler(std::shared_ptr<WireStream> stream,
     ABSL_ASSUME(false);
   }
   resolved_handler = EnsureCleanupOnDone(std::move(resolved_handler));
-
-  // for later: Stubby streams require Accept() to be called before returning
-  // from StartSession. This might not be the ideal solution with other streams.
-  RETURN_IF_ERROR(stream_ptr->Accept());
 
   sessions_.at(session_id)
       ->StartStreamHandler(stream_id, streams_.at(stream_id),

@@ -17,8 +17,9 @@ target_link_libraries(
 
 # -----------------------------------------------------------------------------
 
+set(ACTIONENGINE_USE_PROXYGEN ON)
+add_subdirectory(http)
 add_subdirectory(webrtc)
-add_subdirectory(websockets)
 
 # -----------------------------------------------------------------------------
 

@@ -11,7 +11,7 @@ target_link_libraries(
         absl::failure_signal_handler
         act::actions
         act::data
+        act::net::http::proxygen
         act::nodes
         act::service
-        act::net::websockets
 )

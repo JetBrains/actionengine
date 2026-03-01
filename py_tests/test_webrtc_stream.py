@@ -56,7 +56,7 @@ async def test_webrtc_stream_works():
     rtc_config.preferred_port_range = (20003, 20003)
     webrtc_server = actionengine.webrtc.WebRtcServer.create(
         service,
-        "0.0.0.0",
+        "localhost",
         server_identity,
         SIGNALLING_URL,
         rtc_config,
@@ -91,11 +91,14 @@ async def test_webrtc_stream_works():
 
     finally:
         await asyncio.to_thread(stream.half_close)
+        await asyncio.sleep(0.1)
         settings.readers_deserialise_automatically = (
             current_readers_deserialise_automatically
         )
+        del stream
+        del session
         if webrtc_server:
-            webrtc_server.cancel()
+            await asyncio.to_thread(webrtc_server.cancel)
             await asyncio.to_thread(webrtc_server.join)
 
 

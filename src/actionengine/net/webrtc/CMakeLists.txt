@@ -13,19 +13,19 @@ target_include_directories(
         ${ACTIONENGINE_PROJECT_TOP_LEVEL}
         ${ACTIONENGINE_INCLUDE_DIR}
         ${ACTIONENGINE_THIRD_PARTY_INCLUDE_DIRS}
-
 )
 target_link_libraries(
         actNetWebrtc PUBLIC
         Boost::json
-        Boost::beast
         LibDataChannel::LibDataChannel
-        actNetWebsockets
+        act::net::http
+        act::net::http::proxygen
 )
 target_link_libraries(
         actNetWebrtc PRIVATE
         cppack
         act::concurrency
+        act::data
         act::nodes
         act::stores
 )
@@ -55,6 +55,8 @@ target_link_libraries(
 target_link_libraries(
         actNetWebrtcPybind11 PRIVATE
         act::concurrency
+        act::data
+        act::net::http
 )
 target_include_directories(
         actNetWebrtcPybind11 PUBLIC

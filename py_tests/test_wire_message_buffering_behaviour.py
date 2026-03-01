@@ -129,6 +129,8 @@ async def test_buffering_works():
     message = await asyncio.to_thread(client_stream.receive)
     assert message is None
 
+    await asyncio.sleep(0.1)
+
     webrtc_server.cancel()
     await asyncio.to_thread(webrtc_server.join)
 
@@ -196,6 +198,8 @@ async def test_force_flush_works():
     message = await asyncio.to_thread(client_stream.receive)
     assert message is None
 
+    await asyncio.sleep(0.1)
+
     webrtc_server.cancel()
     await asyncio.to_thread(webrtc_server.join)
 
@@ -251,6 +255,8 @@ async def test_half_close_works_with_buffering():
     message = await asyncio.to_thread(client_stream.receive)
     assert message is None
 
+    await asyncio.sleep(0.1)
+
     webrtc_server.cancel()
     await asyncio.to_thread(webrtc_server.join)
 
@@ -304,5 +310,18 @@ async def test_wire_message_headers():
     assert wire_message.get_header("priority", decode=True) == "high"
     assert wire_message.get_header("secret") == b"\x01\x02\x03\x04"
 
+    await asyncio.sleep(0.1)
+
     webrtc_server.cancel()
     await asyncio.to_thread(webrtc_server.join)
+
+
+async def main():
+    await test_wire_message_headers()
+    await test_force_flush_works()
+    await test_half_close_works_with_buffering()
+    await test_buffering_works()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

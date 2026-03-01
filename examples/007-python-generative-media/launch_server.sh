@@ -7,7 +7,7 @@ while true; do
 
     # Start a background timer that kills it after 5 minutes (300 seconds)
     (
-        sleep 43200
+        sleep 7200
         echo "[$(date)] Time limit reached — restarting server..."
         kill $SERVER_PID 2>/dev/null
     ) &

@@ -23,141 +23,178 @@ export interface NumberedChunk {
   chunk: Chunk;
 }
 
+export interface ChunkStoreReaderOptions {
+  ordered?: boolean;
+  removeChunks?: boolean;
+  nChunksToBuffer?: number;
+  timeout?: number;
+  startSeqOrOffset?: number;
+}
+
 export class ChunkStoreReader {
   private chunkStore: ChunkStore;
 
-  private readonly ordered: boolean;
-  private readonly removeChunks: boolean;
-  private readonly timeout: number;
+  private options: ChunkStoreReaderOptions;
 
   private prefetchLoop: Promise<void> | null;
-  private buffer: Channel<NumberedChunk>;
+  private buffer: Channel<NumberedChunk> | null;
   private totalChunksRead: number;
 
   private mu: Mutex;
 
-  constructor(
-    chunkStore: ChunkStore,
-    ordered: boolean = false,
-    removeChunks: boolean = false,
-    timeout: number = -1,
-  ) {
+  constructor(chunkStore: ChunkStore, options: ChunkStoreReaderOptions = {}) {
     this.chunkStore = chunkStore;
+    this.options = { ...options };
 
-    this.ordered = ordered;
-    this.removeChunks = removeChunks;
-    this.timeout = timeout;
-
-    this.buffer = new Channel<NumberedChunk>();
+    this.buffer = null;
     this.totalChunksRead = 0;
 
     this.prefetchLoop = null;
     this.mu = new Mutex();
   }
 
-  async next(): Promise<NumberedChunk | null> {
-    return await this.mu.runExclusive(async () => {
-      if (this.prefetchLoop === null) {
-        this.prefetchLoop = this.runPrefetchLoop();
-      }
-
-      if (await this.buffer.isClosed()) {
-        return null;
-      }
-
-      let nextNumberedChunk: NumberedChunk | null = null;
-      try {
-        this.mu.release();
-        nextNumberedChunk = await this.buffer.receive();
-      } finally {
-        await this.mu.acquire();
-      }
-
-      if (!nextNumberedChunk.chunk || isEndOfStream(nextNumberedChunk.chunk)) {
-        return null;
-      }
-
-      return nextNumberedChunk;
+  async setOptions(options: ChunkStoreReaderOptions) {
+    await this.mu.runExclusive(() => {
+      this.options = { ...this.options, ...options };
     });
   }
 
-  private async nextInternal(): Promise<NumberedChunk | null> {
-    const nextReadOffset = this.totalChunksRead;
+  async next(): Promise<NumberedChunk | null> {
+    const timeout = this.options.timeout ?? -1;
 
-    let chunk: Chunk | null = null;
-    try {
-      this.mu.release();
-      chunk = await this.chunkStore.getByArrivalOrder(
-        nextReadOffset,
-        this.timeout,
-      );
-    } finally {
-      await this.mu.acquire();
+    await this.mu.runExclusive(async () => {
+      await this.ensurePrefetchIsRunningOrHasCompleted();
+    });
+
+    if (this.buffer === null) {
+      return null;
     }
+
+    let nextNumberedChunk: NumberedChunk | null = null;
+    try {
+      nextNumberedChunk = await this.buffer.receive(timeout);
+    } catch {
+      return null;
+    }
+
+    if (
+      !nextNumberedChunk ||
+      !nextNumberedChunk.chunk ||
+      isEndOfStream(nextNumberedChunk.chunk)
+    ) {
+      return null;
+    }
+
+    return nextNumberedChunk;
+  }
+
+  private async nextInternal(): Promise<NumberedChunk | null> {
+    let nextReadOffset: number;
+    let timeout: number;
+    await this.mu.runExclusive(async () => {
+      nextReadOffset = this.totalChunksRead;
+      timeout = this.options.timeout ?? -1;
+    });
+
+    const chunk = await this.chunkStore.getByArrivalOrder(
+      nextReadOffset,
+      timeout,
+    );
     if (chunk === null) {
       return null;
     }
 
     const seqId = await this.chunkStore.getSeqForArrivalOffset(nextReadOffset);
 
-    if (isEndOfStream(chunk)) {
-      await this.chunkStore.pop(seqId);
-      return null;
-    }
-
     return { seq: seqId, chunk };
   }
 
+  private async ensurePrefetchIsRunningOrHasCompleted() {
+    if (this.prefetchLoop !== null || this.buffer !== null) {
+      return;
+    }
+
+    this.buffer = new Channel<NumberedChunk>(
+      (this.options.nChunksToBuffer ?? -1) > 0
+        ? (this.options.nChunksToBuffer as number)
+        : 100,
+    );
+    this.prefetchLoop = this.runPrefetchLoop();
+  }
+
   private async runPrefetchLoop() {
-    return await this.mu.runExclusive(async () => {
-      while (true) {
-        let finalSeq = await this.chunkStore.getFinalSeq();
-        if (finalSeq >= 0 && this.totalChunksRead > finalSeq) {
-          break;
+    await this.mu.runExclusive(() => {
+      this.totalChunksRead = this.options.startSeqOrOffset ?? 0;
+    });
+
+    while (true) {
+      const finalSeq = await this.chunkStore.getFinalSeq();
+      let totalChunksRead: number;
+      let ordered: boolean;
+      let removeChunks: boolean;
+      let timeout: number;
+
+      await this.mu.runExclusive(async () => {
+        totalChunksRead = this.totalChunksRead;
+        ordered = this.options.ordered ?? false;
+        removeChunks = this.options.removeChunks ?? false;
+        timeout = this.options.timeout ?? -1;
+      });
+
+      if (finalSeq >= 0 && totalChunksRead > finalSeq) {
+        break;
+      }
+
+      let nextChunk: Chunk | null = null;
+      let nextSeq: number = -1;
+      if (ordered) {
+        nextChunk = await this.chunkStore.get(totalChunksRead, timeout);
+        nextSeq = totalChunksRead;
+      } else {
+        const nextNumberedChunk = await this.nextInternal();
+
+        if (nextNumberedChunk !== null) {
+          nextChunk = nextNumberedChunk.chunk;
+          nextSeq = nextNumberedChunk.seq;
         }
+      }
 
-        let nextChunk: Chunk | null = null;
-        let nextSeq: number = -1;
-        if (this.ordered) {
-          try {
-            this.mu.release();
-            nextChunk = await this.chunkStore.get(
-              this.totalChunksRead,
-              this.timeout,
-            );
-          } finally {
-            await this.mu.acquire();
-          }
-
-          nextSeq = this.totalChunksRead;
-        } else {
-          let nextNumberedChunk: NumberedChunk | null = null;
-          nextNumberedChunk = await this.nextInternal();
-
-          if (nextNumberedChunk !== null) {
-            nextChunk = nextNumberedChunk.chunk;
-            nextSeq = nextNumberedChunk.seq;
-          }
-          if (nextSeq === -1) {
-            nextSeq = 0;
-          }
-        }
-
-        if (nextChunk !== null) {
+      if (nextChunk !== null) {
+        if (this.buffer) {
           await this.buffer.send({ seq: nextSeq, chunk: nextChunk });
-          this.totalChunksRead++;
         }
+        await this.mu.runExclusive(async () => {
+          this.totalChunksRead++;
+        });
 
-        if (this.removeChunks && nextSeq >= 0) {
+        if (removeChunks && nextSeq >= 0 && !isEndOfStream(nextChunk)) {
           await this.chunkStore.pop(nextSeq);
         }
-
-        finalSeq = await this.chunkStore.getFinalSeq();
-        if (finalSeq >= 0 && this.totalChunksRead > finalSeq) {
+        if (isEndOfStream(nextChunk)) {
+          break;
+        }
+        // Yield to the event loop to allow other tasks (like UI or message processing) to run
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } else {
+        if (timeout >= 0) {
+          // In C++, if Next returns an error, prefetcher stops.
+          // For now, we just break if we can't get a chunk (e.g. timeout or end).
           break;
         }
       }
+
+      const finalSeqAfter = await this.chunkStore.getFinalSeq();
+      let totalChunksReadAfter: number;
+      await this.mu.runExclusive(async () => {
+        totalChunksReadAfter = this.totalChunksRead;
+      });
+
+      if (finalSeqAfter >= 0 && totalChunksReadAfter > finalSeqAfter) {
+        break;
+      }
+    }
+    if (this.buffer) {
       await this.buffer.close();
-    });
+    }
   }
 }

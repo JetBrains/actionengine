@@ -86,6 +86,25 @@ absl::StatusOr<std::reference_wrapper<NodeRef>> NodeFragment::GetNodeRef() {
       "NodeFragment does not contain a NodeRef, but a Chunk instead.");
 }
 
+std::pair<bool, absl::Status> GetReasonIfIsAbortMessage(
+    const WireMessage& message) {
+  const bool formed_as_abort_message =
+      message.actions.empty() && message.node_fragments.size() == 1 &&
+      message.node_fragments[0].id == "__abort__" &&
+      std::holds_alternative<Chunk>(message.node_fragments[0].data);
+  if (!formed_as_abort_message) {
+    return {false, absl::OkStatus()};
+  }
+  absl::Status status;
+  const bool holds_status =
+      EgltAssignInto(std::get<Chunk>(message.node_fragments[0].data), &status)
+          .ok();
+  if (!holds_status) {
+    return {false, absl::OkStatus()};
+  }
+  return {true, status};
+}
+
 absl::Status EgltAssignInto(Chunk chunk, std::string* string) {
   if (const std::string chunk_mimetype = chunk.GetMimetype();
       !MimetypeIsTextual(chunk_mimetype)) {

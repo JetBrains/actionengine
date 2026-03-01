@@ -39,7 +39,7 @@ uint32_t Rand32() {
 
   absl::call_once(init_rand32_once, InitRand32);
   uint32_t r = last_rand32.load(std::memory_order_relaxed);
-  r = r << 1 ^ (static_cast<int32_t>(r) >> 31) & poly;
+  r = r << 1 ^ ((static_cast<int32_t>(r) >> 31) & poly);
   // shift sign-extends
   last_rand32.store(r, std::memory_order_relaxed);
   return r;

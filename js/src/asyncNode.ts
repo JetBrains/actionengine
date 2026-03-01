@@ -16,7 +16,11 @@
 
 import { ChunkStore, LocalChunkStore } from './chunkStore.js';
 import { Chunk, endOfStream } from './data.js';
-import { ChunkStoreReader, NumberedChunk } from './chunkStoreReader.js';
+import {
+  ChunkStoreReader,
+  NumberedChunk,
+  ChunkStoreReaderOptions,
+} from './chunkStoreReader.js';
 import { ChunkStoreWriter } from './chunkStoreWriter.js';
 import { BaseActionEngineStream } from './stream.js';
 import { Mutex } from './utils.js';
@@ -43,13 +47,17 @@ export class NodeMap {
 
   getNode(id: string): AsyncNode {
     if (!this.nodes.has(id)) {
-      this.nodes.set(id, new AsyncNode(id, this.chunkStoreFactory()));
+      this.nodes.set(
+        id,
+        new AsyncNode(id, this.nodes, this.chunkStoreFactory()),
+      );
     }
     return this.nodes.get(id) as AsyncNode;
   }
 }
 
 export class AsyncNode {
+  private readonly nodeMap: NodeMap | Map<string, AsyncNode> | null;
   private readonly chunkStore: ChunkStore;
   private defaultReader: ChunkStoreReader | null;
   private defaultWriter: ChunkStoreWriter | null;
@@ -57,7 +65,12 @@ export class AsyncNode {
   private writerStream: BaseActionEngineStream | null;
   private readonly mutex: Mutex;
 
-  constructor(id: string = '', chunkStore: ChunkStore | null = null) {
+  constructor(
+    id: string = '',
+    nodeMap: NodeMap | Map<string, AsyncNode> | null = null,
+    chunkStore: ChunkStore | null = null,
+  ) {
+    this.nodeMap = nodeMap;
     this.chunkStore = chunkStore || new LocalChunkStore();
     this.chunkStore.setId(id);
     this.defaultReader = null;
@@ -79,6 +92,9 @@ export class AsyncNode {
   }
 
   getId(): string {
+    if (this.nodeMap) {
+      return this.chunkStore.getId();
+    }
     return this.chunkStore.getId();
   }
 
@@ -132,12 +148,8 @@ export class AsyncNode {
     });
   }
 
-  setReaderOptions(
-    ordered: boolean = false,
-    removeChunks: boolean = false,
-    nChunksToBuffer: number = -1,
-  ): AsyncNode {
-    this.ensureReader(ordered, removeChunks, nChunksToBuffer).then();
+  setReaderOptions(options: ChunkStoreReaderOptions): AsyncNode {
+    this.ensureReader(options).then();
     return this;
   }
 
@@ -146,21 +158,13 @@ export class AsyncNode {
     return this.defaultWriter as ChunkStoreWriter;
   }
 
-  private async ensureReader(
-    ordered: boolean = false,
-    removeChunks: boolean = false,
-    nChunksToBuffer: number = -1,
-  ) {
-    await this.mutex.runExclusive(() => {
+  private async ensureReader(options: ChunkStoreReaderOptions = {}) {
+    await this.mutex.runExclusive(async () => {
       if (this.defaultReader !== null) {
+        await this.defaultReader.setOptions(options);
         return;
       }
-      this.defaultReader = new ChunkStoreReader(
-        this.chunkStore,
-        ordered,
-        removeChunks,
-        nChunksToBuffer,
-      );
+      this.defaultReader = new ChunkStoreReader(this.chunkStore, options);
     });
   }
 

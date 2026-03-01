@@ -36,6 +36,7 @@
 #include <rtc/common.hpp>
 #include <rtc/configuration.hpp>
 #include <rtc/description.hpp>
+#include <rtc/global.hpp>
 #include <rtc/reliability.hpp>
 
 #include "actionengine/concurrency/concurrency.h"
@@ -46,6 +47,19 @@
 #include "cppack/msgpack.h"
 
 namespace act::net {
+
+absl::once_flag set_sctp_settings_once;
+
+void SetSctpSettings() {
+  rtc::SctpSettings settings;
+  settings.recvBufferSize = 8 * 1024 * 1024;  // 8MiB
+  settings.sendBufferSize = 8 * 1024 * 1024;
+  rtc::SetSctpSettings(std::move(settings));
+}
+
+void InitSctpSettings() {
+  absl::call_once(set_sctp_settings_once, SetSctpSettings);
+}
 
 absl::StatusOr<TurnServer> TurnServer::FromString(std::string_view url) {
   std::string_view username_password;
@@ -300,52 +314,40 @@ WebRtcWireStream::WebRtcWireStream(
       connection_(std::move(connection)),
       data_channel_(std::move(data_channel)) {
 
+  codec_ = std::make_unique<act::data::ByteSplittingCodec>(
+      [this](const uint8_t* data, size_t size) {
+        data_channel_->send(reinterpret_cast<const std::byte*>(data), size);
+        return absl::OkStatus();
+      },
+      65536);
+
   data_channel_->onMessage(
       [this](rtc::binary message) {
-        const size_t message_size = message.size();
-        const auto data = reinterpret_cast<uint8_t*>(std::move(message).data());
-        absl::StatusOr<data::BytePacket> packet =
-            data::ParseBytePacket(data, message_size);
+        DCHECK(codec_ != nullptr)
+            << "WebRTC streams must use a byte splitting codec.";
+
+        const auto data = reinterpret_cast<const uint8_t*>(message.data());
+        const size_t size = message.size();
+
+        absl::StatusOr<std::optional<std::vector<uint8_t>>> maybe_full_message =
+            codec_->FeedIncomingPacket(data, size);
 
         act::MutexLock lock(&mu_);
-
         if (closed_) {
           return;
         }
-
-        if (!packet.ok()) {
+        if (!maybe_full_message.ok()) {
           CloseOnError(absl::InternalError(
               absl::StrFormat("WebRtcWireStream unpack failed: %s",
-                              packet.status().message())));
+                              maybe_full_message.status().message())));
           return;
         }
-
-        const uint64_t transient_id = GetTransientIdFromPacket(*packet);
-        auto& chunked_message = chunked_messages_[transient_id];
-        if (!chunked_message) {
-          chunked_message = std::make_unique<data::ChunkedBytes>();
-        }
-        auto got_full_message = chunked_message->FeedPacket(*std::move(packet));
-        if (!got_full_message.ok()) {
-          CloseOnError(absl::InternalError(
-              absl::StrFormat("WebRtcWireStream chunked message "
-                              "feed failed: %s",
-                              got_full_message.status().message())));
+        if (!*maybe_full_message) {
           return;
-        }
-
-        if (!*got_full_message) {
-          return;  // Not all chunks received yet, wait for more.
         }
 
         absl::StatusOr<std::vector<uint8_t>> message_data =
-            chunked_message->ConsumeCompleteBytes();
-        if (!message_data.ok()) {
-          CloseOnError(absl::InternalError(
-              absl::StrFormat("WebRtcWireStream consume failed: %s",
-                              message_data.status().message())));
-          return;
-        }
+            **std::move(maybe_full_message);
 
         mu_.unlock();
         absl::StatusOr<WireMessage> unpacked =
@@ -360,7 +362,6 @@ WebRtcWireStream::WebRtcWireStream(
         }
 
         recv_channel_.writer()->WriteUnlessCancelled(*std::move(unpacked));
-        chunked_messages_.erase(transient_id);
       },
       [](const rtc::string&) {});
 
@@ -510,6 +511,9 @@ absl::Status WebRtcWireStream::SendWithoutBuffering(WireMessage message) {
 
 absl::Status WebRtcWireStream::SendInternal(WireMessage message)
     ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  DCHECK(codec_ != nullptr)
+      << "WebRTC streams must use a byte splitting codec.";
+
   constexpr absl::Duration openOrCloseTimeout = absl::Seconds(10);
   const absl::Time deadline = absl::Now() + openOrCloseTimeout;
   while (!opened_ && !closed_) {
@@ -523,33 +527,12 @@ absl::Status WebRtcWireStream::SendInternal(WireMessage message)
     return absl::CancelledError("WebRtcWireStream is closed");
   }
 
-  const uint64_t transient_id = next_transient_id_++;
-
   mu_.unlock();
-
   const std::vector<uint8_t> message_uint8_t = cppack::Pack(std::move(message));
-
-  const std::vector<data::BytePacket> packets = data::SplitBytesIntoPackets(
-      message_uint8_t, transient_id,
-      static_cast<int64_t>(connection_->remoteMaxMessageSize()));
-
-  std::vector<std::vector<uint8_t>> serialized_packets;
-  serialized_packets.reserve(packets.size());
-  for (auto& packet : packets) {
-    serialized_packets.push_back(data::SerializeBytePacket(packet));
-    // TODO: clear packet to save memory
-  }
-
-  absl::Status status;
-  for (const auto& serialized_packet : serialized_packets) {
-    const auto* message_chunk_data =
-        reinterpret_cast<const rtc::byte*>(serialized_packet.data());
-    rtc::binary message_chunk_bytes(
-        message_chunk_data, message_chunk_data + serialized_packet.size());
-    data_channel_->send(std::move(message_chunk_bytes));
-  }
-
+  absl::Status status =
+      codec_->Write(message_uint8_t.data(), message_uint8_t.size());
   mu_.lock();
+
   return status;
 }
 
@@ -578,28 +561,15 @@ absl::StatusOr<std::optional<WireMessage>> WebRtcWireStream::Receive(
         "WebRtcWireStream Receive timed out while waiting for a message.");
   }
 
-  if (message.actions.empty() && message.node_fragments.empty()) {
+  if (IsHalfCloseMessage(message)) {
     return std::nullopt;
   }
 
-  for (const auto& fragment : message.node_fragments) {
-    if (fragment.id == "__abort__") {
-      if (!std::holds_alternative<Chunk>(fragment.data)) {
-        status_ = absl::InternalError(
-            "Received abort fragment with invalid data type. Aborting anyway.");
-        CloseOnError(status_);
-        return status_;
-      }
-      absl::StatusOr<absl::Status> abort_status_or =
-          ConvertTo<absl::Status>(std::get<Chunk>(fragment.data));
-      if (!abort_status_or.ok()) {
-        status_ = abort_status_or.status();
-      } else {
-        status_ = *abort_status_or;
-      }
-      CloseOnError(status_);
-      return status_;
-    }
+  if (auto [is_abort, abort_status] = GetReasonIfIsAbortMessage(message);
+      is_abort) {
+    status_ = std::move(abort_status);
+    CloseOnError(status_);
+    return status_;
   }
 
   return message;
@@ -615,13 +585,7 @@ void WebRtcWireStream::AbortInternal(absl::Status status) {
     return;
   }
 
-  WireMessage abort_message{
-      .node_fragments = {{
-          .id = "__abort__",
-          .data = ConvertTo<Chunk>(std::move(status)).value(),
-          .seq = 0,
-          .continued = false,
-      }}};
+  WireMessage abort_message = MakeAbortMessage(std::move(status));
 
   if (buffering_behaviour_ != nullptr) {
     buffering_behaviour_->Send(abort_message).IgnoreError();
@@ -812,6 +776,7 @@ absl::StatusOr<WebRtcDataChannelConnection> StartWebRtcDataChannel(
     std::string_view signalling_address, uint16_t signalling_port,
     std::optional<RtcConfig> rtc_config, bool use_ssl,
     const absl::flat_hash_map<std::string, std::string>& headers) noexcept {
+  InitSctpSettings();
   auto state = std::make_shared<EstablishmentState>();
 
   state->set_signalling_client(std::make_unique<SignallingClient>(
@@ -953,7 +918,9 @@ absl::StatusOr<WebRtcDataChannelConnection> StartWebRtcDataChannel(
     }
   }
 
-  return state->Wait(absl::Now() + absl::Seconds(30));
+  auto connection = state->Wait(absl::Now() + absl::Seconds(30));
+  state->set_signalling_client(nullptr);
+  return connection;
 }
 
 absl::StatusOr<std::unique_ptr<WebRtcWireStream>> StartStreamWithSignalling(

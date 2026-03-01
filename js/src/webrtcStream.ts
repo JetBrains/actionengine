@@ -252,7 +252,8 @@ class ChunkedMessage {
 
   private readonly mu: Mutex;
   private readonly cv: CondVar;
-  private shouldStop: boolean;
+
+  private holdoutChunks: Map<number, Uint8Array<ArrayBuffer>>;
 
   constructor() {
     this.chunkStore = new LocalChunkStore();
@@ -261,21 +262,18 @@ class ChunkedMessage {
 
     this.mu = new Mutex();
     this.cv = new CondVar();
+
+    this.holdoutChunks = new Map();
   }
 
   async feedPacket(packet: WebRtcPacket): Promise<boolean> {
-    if (
-      (await this.chunkStore.size()) >= this.totalChunksExpected &&
-      this.totalChunksExpected !== -1
-    ) {
-      throw new Error('Chunk store is full, cannot feed more packets');
-    }
-
     if (packet.type === WebRtcPacketType.PlainWireMessage) {
-      this.totalMessageSize += (
-        packet as WebRtcPlainWireMessage
-      ).serializedMessage.length;
-      this.totalChunksExpected = 1;
+      await this.mu.runExclusive(async () => {
+        this.totalMessageSize += (
+          packet as WebRtcPlainWireMessage
+        ).serializedMessage.length;
+        this.totalChunksExpected = 1;
+      });
       await this.chunkStore.put(
         0,
         {
@@ -287,27 +285,27 @@ class ChunkedMessage {
         true,
       );
       await this.mu.runExclusive(async () => {
-        this.shouldStop = true;
         this.cv.notifyAll();
       });
       return true;
     }
 
     if (packet.type === WebRtcPacketType.WireMessageChunk) {
-      if (this.totalChunksExpected === -1) {
-        await this.mu.runExclusive(async () => {
-          while (this.totalChunksExpected === -1 && !this.shouldStop) {
-            await this.cv.wait(this.mu);
-          }
-          if (this.shouldStop) {
-            throw new Error(
-              'Cannot feed chunked message: previous error occurred',
-            );
-          }
-        });
-      }
       const chunk = packet as WebRtcWireMessageChunk;
-      this.totalMessageSize += chunk.chunk.length;
+      let shouldWait = false;
+      await this.mu.runExclusive(async () => {
+        if (this.totalChunksExpected === -1) {
+          this.holdoutChunks.set(chunk.seq, chunk.chunk);
+          shouldWait = true;
+        } else {
+          this.totalMessageSize += chunk.chunk.length;
+        }
+      });
+
+      if (shouldWait) {
+        return false;
+      }
+
       await this.chunkStore.put(
         chunk.seq,
         {
@@ -316,65 +314,87 @@ class ChunkedMessage {
         },
         chunk.seq === this.totalChunksExpected - 1,
       );
+
       return (await this.chunkStore.size()) === this.totalChunksExpected;
     }
 
     if (packet.type === WebRtcPacketType.LengthSuffixedWireMessageChunk) {
-      if (this.totalChunksExpected !== -1) {
-        await this.mu.runExclusive(async () => {
-          this.shouldStop = true;
+      const chunk = packet as WebRtcLengthSuffixedWireMessageChunk;
+      let holdoutsToProcess: [number, Uint8Array<ArrayBuffer>][] = [];
+
+      await this.mu.runExclusive(async () => {
+        if (this.totalChunksExpected !== -1) {
           this.cv.notifyAll();
-        });
-        throw new Error(
-          'Received a length-suffixed chunk while already processing a message',
+          throw new Error(
+            'Received a length-suffixed chunk while already processing a message',
+          );
+        }
+
+        this.totalMessageSize += chunk.chunk.length;
+        this.totalChunksExpected = chunk.length;
+
+        holdoutsToProcess = Array.from(this.holdoutChunks.entries());
+        this.holdoutChunks.clear();
+
+        for (const holdouts of holdoutsToProcess) {
+          const data = holdouts[1];
+          this.totalMessageSize += data.length;
+        }
+        this.cv.notifyAll();
+      });
+
+      // Process holdouts
+      for (const [seq, data] of holdoutsToProcess) {
+        await this.chunkStore.put(
+          seq,
+          {
+            data: data,
+            metadata: { mimetype: '' },
+          },
+          seq === this.totalChunksExpected - 1,
         );
       }
 
-      const chunk = packet as WebRtcLengthSuffixedWireMessageChunk;
-      await this.mu.runExclusive(async () => {
-        this.totalMessageSize += chunk.chunk.length;
-        this.totalChunksExpected = chunk.length;
-      });
-
+      // Process this chunk
       await this.chunkStore.put(
-        0,
+        chunk.seq,
         {
           data: chunk.chunk,
           metadata: { mimetype: '' },
         },
         chunk.seq === this.totalChunksExpected - 1,
       );
+
       return (await this.chunkStore.size()) === this.totalChunksExpected;
     }
 
     await this.mu.runExclusive(async () => {
-      this.shouldStop = true;
       this.cv.notifyAll();
     });
     throw new Error('Not implemented');
   }
 
   async consume(): Promise<Uint8Array<ArrayBuffer>> {
-    if (
-      (await this.chunkStore.size()) < this.totalChunksExpected &&
-      this.totalChunksExpected !== -1
-    ) {
+    const size = await this.chunkStore.size();
+    if (size < this.totalChunksExpected && this.totalChunksExpected !== -1) {
       await this.mu.runExclusive(async () => {
-        this.shouldStop = true;
         this.cv.notifyAll();
       });
       throw new Error(
-        `Not enough chunks to consume: expected ${this.totalChunksExpected}, got ${await this.chunkStore.size()}`,
+        `Not enough chunks to consume: expected ${this.totalChunksExpected}, got ${size}`,
       );
     }
 
     await this.mu.runExclusive(async () => {
-      this.shouldStop = true;
       this.cv.notifyAll();
     });
 
     const chunks: Uint8Array<ArrayBuffer>[] = [];
     for (let i = 0; i < this.totalChunksExpected; i++) {
+      // In JS, all packets are currently reassembled in the same task,
+      // so we can expect all chunks to be present in the chunkStore.
+      // chunkStore.get() is still async but it should resolve immediately
+      // if the chunk is already there.
       chunks.push((await this.chunkStore.get(i)).data);
     }
 
@@ -389,6 +409,7 @@ const setupDataChannel = (
 ) => {
   channel.onopen = async () => {
     console.log(`DataChannel open`);
+    console.log(`Ordered: ${channel.ordered}`);
     if (socket !== undefined) {
       socket.close();
     }
@@ -398,7 +419,15 @@ const setupDataChannel = (
     console.log(`DataChannel closed`);
     await stream.close();
   };
-  channel.onmessage = async (e) => {
+  channel.onmessage = async (e: MessageEvent) => {
+    stream.connection.getStats().then((r) => {
+      r.forEach((report) => {
+        if (report.type === 'candidate-pair' && report.selected) {
+          console.log('RTT:', report.currentRoundTripTime);
+        }
+      });
+    });
+    const start = performance.now();
     let data: Uint8Array<ArrayBuffer>;
     if (e.data instanceof ArrayBuffer) {
       data = new Uint8Array(e.data);
@@ -410,8 +439,12 @@ const setupDataChannel = (
       console.warn('Received unknown data type:', e.data);
       return;
     }
+    console.log(
+      `Received ${data.length} bytes in ${performance.now() - start}ms`,
+    );
+
     const packet = parseWebRtcPacket(data);
-    stream.feedWebRtcPacket(packet).then();
+    await stream.feedWebRtcPacket(packet);
   };
 };
 
@@ -523,7 +556,7 @@ export class WebRtcActionEngineStream implements BaseActionEngineStream {
   private readonly identity: string;
   // private id: string
 
-  private readonly connection: RTCPeerConnection;
+  readonly connection: RTCPeerConnection;
   private rtcDataChannel: RTCDataChannel;
   private readonly channel: Channel<WireMessage | null>;
 

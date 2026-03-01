@@ -293,6 +293,26 @@ struct WireMessage {
   }
 };
 
+inline bool IsHalfCloseMessage(const WireMessage& message) {
+  return message.actions.empty() && message.node_fragments.empty();
+}
+
+inline WireMessage MakeHalfCloseMessage() {
+  return WireMessage{};
+}
+
+std::pair<bool, absl::Status> GetReasonIfIsAbortMessage(
+    const WireMessage& message);
+
+inline WireMessage MakeAbortMessage(absl::Status status) {
+  return {.node_fragments = {{
+              .id = "__abort__",
+              .data = ConvertTo<Chunk>(std::move(status)).value(),
+              .seq = 0,
+              .continued = false,
+          }}};
+}
+
 template <typename T>
 absl::Status EgltAssignInto(T src, T* absl_nonnull dst) {
   static_assert(std::is_move_constructible_v<T>);

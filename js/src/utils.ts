@@ -186,84 +186,74 @@ export class CondVar {
 }
 
 export class Deque<ValueType> {
-  data: Array<ValueType>;
-  front: number;
-  back: number;
+  data: Array<ValueType | undefined>;
+  head: number;
+  tail: number;
+  capacity: number;
   size: number;
-  private readonly mutex: Mutex;
 
-  constructor() {
-    this.data = [];
-    this.front = 0;
-    this.back = 1;
+  constructor(capacity: number = 65536) {
+    this.data = new Array(capacity);
+    this.head = 0;
+    this.tail = 0;
+    this.capacity = capacity;
     this.size = 0;
-    this.mutex = new Mutex();
   }
 
-  async addFront(value: ValueType) {
-    return await this.mutex.runExclusive(async () => {
-      if (this.size >= Number.MAX_SAFE_INTEGER) {
-        throw 'Deque capacity overflow';
-      }
-      this.size++;
-      this.front = (this.front + 1) % Number.MAX_SAFE_INTEGER;
-      this.data[this.front] = value;
-    });
+  addFront(value: ValueType) {
+    if (this.size >= this.capacity) {
+      throw new Error('Deque capacity overflow');
+    }
+    this.head = (this.head - 1 + this.capacity) % this.capacity;
+    this.data[this.head] = value;
+    this.size++;
   }
 
-  async removeFront(): Promise<ValueType | null> {
-    return await this.mutex.runExclusive(async () => {
-      if (!this.size) {
-        throw 'Deque is empty';
-      }
-      const value = this.size > 0 ? this.data[this.front] : null;
-      this.size--;
-      delete this.data[this.front];
-      this.front = (this.front || Number.MAX_SAFE_INTEGER) - 1;
-      return value;
-    });
+  removeFront(): ValueType | null {
+    if (this.size === 0) {
+      throw new Error('Deque is empty');
+    }
+    const value = this.data[this.head];
+    this.data[this.head] = undefined;
+    this.head = (this.head + 1) % this.capacity;
+    this.size--;
+    return value ?? null;
   }
 
-  async peekFront(): Promise<ValueType | null> {
-    return await this.mutex.runExclusive(async () => {
-      if (this.size) {
-        return this.data[this.front];
-      } else {
-        return null;
-      }
-    });
+  peekFront(): ValueType | null {
+    if (this.size > 0) {
+      return this.data[this.head] ?? null;
+    } else {
+      return null;
+    }
   }
 
-  async addBack(value: ValueType) {
-    return await this.mutex.runExclusive(async () => {
-      if (this.size >= Number.MAX_SAFE_INTEGER) throw 'Deque capacity overflow';
-      this.size++;
-      this.back = (this.back || Number.MAX_SAFE_INTEGER) - 1;
-      this.data[this.back] = value;
-    });
+  addBack(value: ValueType) {
+    if (this.size >= this.capacity) {
+      throw new Error('Deque capacity overflow');
+    }
+    this.data[this.tail] = value;
+    this.tail = (this.tail + 1) % this.capacity;
+    this.size++;
   }
 
-  async removeBack(): Promise<ValueType | null> {
-    return await this.mutex.runExclusive(async () => {
-      if (!this.size) {
-        throw 'Deque is empty';
-      }
-      const value = this.size > 0 ? this.data[this.back] : null;
-      this.size--;
-      delete this.data[this.back];
-      this.back = (this.back + 1) % Number.MAX_SAFE_INTEGER;
-      return value;
-    });
+  removeBack(): ValueType | null {
+    if (this.size === 0) {
+      throw new Error('Deque is empty');
+    }
+    this.tail = (this.tail - 1 + this.capacity) % this.capacity;
+    const value = this.data[this.tail];
+    this.data[this.tail] = undefined;
+    this.size--;
+    return value ?? null;
   }
 
-  async peekBack(): Promise<ValueType | null> {
-    return await this.mutex.runExclusive(async () => {
-      if (this.size) {
-        return this.data[this.back];
-      } else {
-        return null;
-      }
-    });
+  peekBack(): ValueType | null {
+    if (this.size > 0) {
+      return this.data[(this.tail - 1 + this.capacity) % this.capacity] ?? null;
+    } else {
+      return null;
+    }
   }
 }
 
@@ -275,7 +265,7 @@ export class Channel<ValueType> {
   private closed: boolean;
 
   constructor(nBufferedMessages: number = 100) {
-    this.deque = new Deque<ValueType>();
+    this.deque = new Deque<ValueType>(Math.max(nBufferedMessages, 100));
     this.nBufferedMessages = nBufferedMessages;
     this.mutex = new Mutex();
     this.cv = new CondVar();
@@ -293,7 +283,7 @@ export class Channel<ValueType> {
       if (this.closed) {
         throw new Error('Channel closed');
       }
-      await this.deque.addBack(value);
+      this.deque.addBack(value);
       this.cv.notifyAll();
     });
   }
@@ -303,7 +293,7 @@ export class Channel<ValueType> {
       if (this.closed) {
         throw new Error('Channel closed');
       }
-      await this.deque.addBack(value);
+      this.deque.addBack(value);
       this.cv.notifyAll();
     });
   }
@@ -320,7 +310,7 @@ export class Channel<ValueType> {
         throw new Error('Channel closed');
       }
 
-      return await this.deque.removeFront();
+      return this.deque.removeFront() as ValueType;
     });
   }
 

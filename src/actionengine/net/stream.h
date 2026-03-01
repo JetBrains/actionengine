@@ -85,7 +85,7 @@ class WireStream {
   virtual absl::Status AttachBufferingBehaviour(
       net::WireMessageBufferingBehaviour* absl_nullable sender);
 
-  virtual bool HasAttachedBufferingBehaviour() const;
+  [[nodiscard]] virtual bool HasAttachedBufferingBehaviour() const;
 
   /**
    * Receives an ActionEngine wire message from the stream.
@@ -159,7 +159,7 @@ class WireStream {
    * over this stream.
    *
    * @note
-   *   This method does not close the stream, nor does it initiate a
+   *   This method does not close the stream, nor does it initiate
    *   finalisation. It simply indicates that no more messages will be sent.
    *   The stream remains open for receiving messages, and the other end can
    *   still send messages until it also calls HalfClose() or closes the stream.
@@ -202,7 +202,7 @@ class WireStream {
    * @return
    *   A string representing the unique identifier of the stream.
    *   This identifier is used to distinguish between different streams in the
-   *   same process, but not across a load balanced group, for example.
+   *   same process, but not across a load-balanced group, for example.
    */
   [[nodiscard]] virtual auto GetId() const -> std::string = 0;
 
@@ -237,6 +237,7 @@ class WireStream {
 };
 
 namespace net {
+
 class WireMessageBufferingBehaviour {
  public:
   virtual ~WireMessageBufferingBehaviour() = default;

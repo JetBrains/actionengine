@@ -74,7 +74,7 @@ struct LengthSuffixedByteChunkPacket {
 };
 
 using BytePacket = std::variant<CompleteBytesPacket, ByteChunkPacket,
-                                LengthSuffixedByteChunkPacket>;
+                                LengthSuffixedByteChunkPacket, std::monostate>;
 
 BytePacket ProducePacket(std::vector<Byte>::const_iterator it,
                          std::vector<Byte>::const_iterator end,
@@ -82,8 +82,13 @@ BytePacket ProducePacket(std::vector<Byte>::const_iterator it,
                          uint32_t seq = 0, int32_t length = -1,
                          bool force_no_length = false);
 
-absl::StatusOr<BytePacket> ParseBytePacket(Byte* data, size_t size);
+absl::StatusOr<BytePacket> ParseBytePacket(const Byte* absl_nonnull data,
+                                           size_t size);
 
+std::vector<BytePacket> SplitBytesIntoPackets(const Byte* absl_nonnull data,
+                                              size_t size,
+                                              uint64_t transient_id,
+                                              uint64_t packet_size = 65536);
 std::vector<BytePacket> SplitBytesIntoPackets(const std::vector<Byte>& data,
                                               uint64_t transient_id,
                                               uint64_t packet_size = 65536);
@@ -118,6 +123,34 @@ class ChunkedBytes {
       ABSL_GUARDED_BY(mu_);
 };
 
+class ByteSplittingCodec {
+ public:
+  explicit ByteSplittingCodec(
+      std::function<absl::Status(const uint8_t* absl_nonnull, size_t)>
+          write_bytes,
+      size_t split_size = 65536);
+
+  absl::Status Write(std::string_view data);
+  absl::Status Write(const char* absl_nonnull data, size_t len);
+  absl::Status Write(const uint8_t* absl_nonnull data, size_t len);
+
+  absl::StatusOr<std::optional<std::vector<uint8_t>>> FeedIncomingPacket(
+      const char* absl_nonnull data, size_t len);
+  absl::StatusOr<std::optional<std::vector<uint8_t>>> FeedIncomingPacket(
+      const uint8_t* absl_nonnull data, size_t len);
+
+ private:
+  mutable act::Mutex mu_;
+
+  const std::function<absl::Status(const uint8_t* absl_nonnull, size_t)>
+      write_bytes_;
+  const size_t split_size_;
+
+  absl::flat_hash_map<uint64_t, std::unique_ptr<data::ChunkedBytes>>
+      chunked_messages_ ABSL_GUARDED_BY(mu_) = {};
+  std::atomic<uint64_t> next_transient_message_id_ = 0;
+};
+
 }  // namespace act::data
 
-#endif  // ACTIONENGINE_DATA_BYTE_CHUNKING_H_
+#endif  // ACTIONENGINE_STORES_BYTE_CHUNKING_H_

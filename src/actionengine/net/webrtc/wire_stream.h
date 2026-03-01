@@ -35,11 +35,14 @@
 
 #include "actionengine/concurrency/concurrency.h"
 #include "actionengine/data/types.h"
+#include "actionengine/net/http/ws_common.h"
 #include "actionengine/net/stream.h"
 #include "actionengine/net/webrtc/signalling_client.h"
 #include "actionengine/stores/byte_chunking.h"
 
 namespace act::net {
+
+void InitSctpSettings();
 
 struct TurnServer {
   static absl::StatusOr<TurnServer> FromString(std::string_view url);
@@ -200,9 +203,7 @@ class WebRtcWireStream final : public WireStream {
   std::shared_ptr<rtc::DataChannel> data_channel_;
   thread::Channel<WireMessage> recv_channel_{kBufferSize};
 
-  absl::flat_hash_map<uint64_t, std::unique_ptr<data::ChunkedBytes>>
-      chunked_messages_ ABSL_GUARDED_BY(mu_) = {};
-  uint64_t next_transient_id_ ABSL_GUARDED_BY(mu_) = 0;
+  std::unique_ptr<act::data::ByteSplittingCodec> codec_;
 
   bool opened_ ABSL_GUARDED_BY(mu_) = false;
   bool closed_ ABSL_GUARDED_BY(mu_) = false;

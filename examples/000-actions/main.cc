@@ -24,9 +24,9 @@
 #include <actionengine/net/webrtc/wire_stream.h>
 #include <actionengine/nodes/async_node.h>
 #include <actionengine/service/service.h>
+#include <actionengine/util/metrics.h>
 #include <actionengine/util/random.h>
-
-#include "actionengine/util/metrics.h"
+#include <actionengine/util/status_macros.h>
 
 ABSL_FLAG(uint16_t, port, 20000, "Port to try to bind the WebRTC server to.");
 
@@ -143,9 +143,6 @@ absl::StatusOr<std::string> CallEcho(
   echo->mutable_bound_resources()->set_stream_non_owning(stream.get());
 
   {
-    act::net::MergeWireMessagesWhileInScope merge(stream.get());
-    RETURN_IF_ERROR(stream->AttachBufferingBehaviour(&merge));
-
     if (const auto status = echo->Call(); !status.ok()) {
       LOG(ERROR) << "Failed to call action: " << status;
       return "";
@@ -207,7 +204,6 @@ absl::Status Main(int argc, char** argv) {
 
   act::NodeMap node_map;
   act::Session session;
-  LOG(INFO) << "client session " << &session;
   session.set_action_registry(action_registry);
   session.set_node_map(&node_map);
   std::string identity = act::GenerateUUID4();
@@ -237,7 +233,7 @@ absl::Status Main(int argc, char** argv) {
   }
 
   stream->HalfClose();
-  act::SleepFor(absl::Seconds(0.2));
+  act::SleepFor(absl::Seconds(0.1));
 
   RETURN_IF_ERROR(server.Cancel());
   RETURN_IF_ERROR(server.Join());

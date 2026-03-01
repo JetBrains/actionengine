@@ -142,11 +142,6 @@ class Service : public std::enable_shared_from_this<Service> {
    */
   auto SetActionRegistry(const ActionRegistry& action_registry) const -> void;
 
-  void DisallowNewConnections() {
-    act::MutexLock lock(&mu_);
-    allow_new_connections_ = false;
-  }
-
  private:
   StreamHandler EnsureCleanupOnDone(StreamHandler handler);
 

@@ -12,32 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef ACTIONENGINE_NET_WEBSOCKETS_SERVER_H_
-#define ACTIONENGINE_NET_WEBSOCKETS_SERVER_H_
+#ifndef ACTIONENGINE_NET_HTTP_PROXYGEN_SERVER_H_
+#define ACTIONENGINE_NET_HTTP_PROXYGEN_SERVER_H_
 
-#include <cstdint>
-#include <memory>
-#include <optional>
 #include <string>
-#include <string_view>
 
-#define BOOST_ASIO_NO_DEPRECATED
-
-#include <absl/base/nullability.h>
-#include <absl/base/thread_annotations.h>
-#include <absl/log/check.h>
+#include <absl/flags/flag.h>
 #include <absl/status/status.h>
-#include <absl/status/statusor.h>
-#include <absl/strings/str_format.h>
-#include <boost/asio/ip/tcp.hpp>
 
-#include "actionengine/concurrency/concurrency.h"
 #include "actionengine/data/types.h"
-#include "actionengine/net/stream.h"
-#include "actionengine/net/websockets/fiber_aware_websocket_stream.h"
+#include "actionengine/net/http/ws_common.h"
 #include "actionengine/service/service.h"
 
-namespace act::net {
+namespace folly {
+class SocketAddress;
+}
+
+namespace proxygen {
+class HTTPServer;
+}
+
+namespace act::net::http {
 
 class WebsocketServer {
  public:
@@ -48,26 +43,35 @@ class WebsocketServer {
   ~WebsocketServer();
 
   void Run();
+  void StopListening();
 
-  absl::Status Cancel();
+  void Cancel();
 
+  absl::Status GetStatus() const;
   absl::Status Join();
 
  private:
-  absl::Status CancelInternal() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  void StopListeningInternal() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  void CancelInternal() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
   absl::Status JoinInternal() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
-  std::unique_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
-  act::Service* absl_nonnull const service_;
-
   mutable act::Mutex mu_;
-  std::unique_ptr<thread::Fiber> main_loop_;
-  bool cancelled_ ABSL_GUARDED_BY(mu_) = false;
-  act::CondVar join_cv_ ABSL_GUARDED_BY(mu_);
+  mutable act::CondVar cv_ ABSL_GUARDED_BY(mu_);
+
+  act::Service* absl_nonnull const service_;
+  std::unique_ptr<proxygen::HTTPServer> server_;
+  const std::string address_;
+  const uint16_t port_;
+
+  std::unique_ptr<std::thread> main_loop_;
+  std::optional<absl::Status> status_ ABSL_GUARDED_BY(mu_);
+
+  bool prep_done_ ABSL_GUARDED_BY(mu_) = false;
+  bool listening_stopped_ ABSL_GUARDED_BY(mu_) = false;
+  bool stopped_ ABSL_GUARDED_BY(mu_) = false;
   bool joining_ ABSL_GUARDED_BY(mu_) = false;
-  absl::Status status_;
 };
 
-}  // namespace act::net
+}  // namespace act::net::http
 
-#endif  // ACTIONENGINE_NET_WEBSOCKETS_SERVER_H_
+#endif  // ACTIONENGINE_NET_HTTP_PROXYGEN_SERVER_H_

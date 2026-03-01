@@ -15,7 +15,6 @@ target_link_libraries(
         act::data
         act::nodes
         act::service
-        act::net::websockets
         act::net::webrtc
         act::proto
 )
