@@ -1,6 +1,8 @@
+[![JetBrains team project](http://jb.gg/badges/team.svg)](https://github.com/JetBrains/.github/blob/main/profile/README.md)
+
 # Action Engine
 
-Action Engine is a cross-language library for building interactive applications
+Action Engine is a cross-language toolkit for building interactive applications
 that need streaming, multimodal, interactive capabilities. Think of:
 
 - GenAI prototypes and fully served applications that need different media
