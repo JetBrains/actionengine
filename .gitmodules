@@ -42,3 +42,7 @@
 [submodule "third_party/protobuf"]
 	path = third_party/protobuf
 	url = https://github.com/protocolbuffers/protobuf
+[submodule "third_party/proxygen"]
+	path = third_party/proxygen
+	url = https://github.com/hpnkv/proxygen
+	branch = patch-1
