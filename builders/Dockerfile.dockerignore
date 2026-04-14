@@ -35,6 +35,7 @@ third_party/libdatachannel
 third_party/libuv
 third_party/libzmq
 third_party/protobuf
+third_party/proxygen
 third_party/pybind11
 third_party/pybind11_abseil
 third_party/uvw

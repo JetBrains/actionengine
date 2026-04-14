@@ -28,6 +28,7 @@ target_link_libraries(
         act::net::asio_websockets
         act::nodes
         act::stores
+        Boost::json
 )
 
 # ------------------------------------------------------------------

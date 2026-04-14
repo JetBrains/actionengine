@@ -32,7 +32,7 @@ Otherwise, you can install Action Engine directly from the GitHub repository.
 First, make sure you have a recent C++20-compatible `clang` installed, then run:
 
 ```bash
-pip install git+https://github.com/stackofcuriosity/actionengine -v
+pip install git+https://github.com/JetBrains/actionengine -v
 python -c 'import actionengine; print(actionengine.to_chunk("Hello, world!"))'
 ```
 

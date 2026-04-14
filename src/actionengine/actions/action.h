@@ -175,7 +175,7 @@ class ActionExecutionContext {
       ABSL_LOCKS_EXCLUDED(mu_);
 
   void CommunicateHandlerStatus_(const std::shared_ptr<Action>& action,
-                                 absl::Status status)
+                                 const absl::Status& status)
       ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   void ReleaseResourcesAfterRun_(const std::shared_ptr<Action>& action)
@@ -285,7 +285,7 @@ class Action : public std::enable_shared_from_this<Action> {
   AsyncNode* absl_nullable GetOutput(
       std::string_view name, std::optional<bool> bind_stream = std::nullopt);
 
-  absl::StatusOr<void*> GetUserData(std::string_view key) const;
+  absl::StatusOr<std::shared_ptr<void>> GetUserData(std::string_view key) const;
   void SetUserData(std::string_view key, std::shared_ptr<void> value);
 
   void SetOnCancelled(absl::AnyInvocable<void()> callback);
@@ -330,19 +330,6 @@ class Action : public std::enable_shared_from_this<Action> {
   ActionExecutionContext ctx_;
   absl::flat_hash_map<std::string, std::shared_ptr<void>> user_data_;
 };
-
-inline absl::StatusOr<void*> Action::GetUserData(std::string_view key) const {
-  const auto it = user_data_.find(key);
-  if (it == user_data_.end()) {
-    return absl::NotFoundError(absl::StrCat("Key not found: ", key));
-  }
-  return it->second.get();
-}
-
-inline void Action::SetUserData(std::string_view key,
-                                std::shared_ptr<void> value) {
-  user_data_[key] = std::move(value);
-}
 
 }  // namespace act
 

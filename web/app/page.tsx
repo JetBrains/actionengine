@@ -116,7 +116,7 @@ const GoogleBlobs = () => {
       color: '#34A853',
       onClick: () => {
         router.push(
-          'https://github.com/stackofcuriosity/actionengine/tree/main/examples/003-python-speech-to-text',
+          'https://github.com/JetBrains/actionengine/tree/main/examples/003-python-speech-to-text',
         )
       },
     },
@@ -203,7 +203,7 @@ export default function Page() {
             A toolkit for building multimodal, streaming APIs and UIs
           </p>
           <iframe
-            src='https://ghbtns.com/github-btn.html?user=stackofcuriosity&repo=actionengine&type=star'
+            src='https://ghbtns.com/github-btn.html?user=JetBrains&repo=actionengine&type=star'
             frameBorder='0'
             scrolling='0'
             width='170'
@@ -218,14 +218,14 @@ export default function Page() {
             , browser client behavior in{' '}
             <Link
               className='text-blue-600'
-              href='https://github.com/stackofcuriosity/actionengine/tree/main/web'
+              href='https://github.com/JetBrains/actionengine/tree/main/web'
             >
               <u>TypeScript</u>
             </Link>
             , simple starter project in{' '}
             <Link
               className='text-blue-600'
-              href='https://github.com/stackofcuriosity/actionengine/tree/main/examples/000-actions'
+              href='https://github.com/JetBrains/actionengine/tree/main/examples/000-actions'
             >
               <u>C++</u>
             </Link>
@@ -266,7 +266,7 @@ export default function Page() {
                   </h3>
                   <p>ensure you have a modern clang installed, and then run:</p>
                   <div className='mb-2 mt-2'>
-                    <CopyCommand command='pip install git+https://github.com/stackofcuriosity/actionengine' />
+                    <CopyCommand command='pip install git+https://github.com/JetBrains/actionengine' />
                   </div>
                 </div>
               </div>
@@ -342,14 +342,14 @@ export default function Page() {
                       {' '}
                       integrate with{' '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/gemini.py'
+                        href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/gemini.py'
                         className='text-blue-600'
                       >
                         <u>LLMs</u>
                       </Link>{' '}
                       and{' '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/text_to_image.py'
+                        href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/text_to_image.py'
                         className='text-blue-600'
                       >
                         <u>other AI models</u>
@@ -360,14 +360,14 @@ export default function Page() {
                       {' '}
                       build{' '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/010-service/service.py'
+                        href='https://github.com/JetBrains/actionengine/blob/main/examples/010-service/service.py'
                         className='text-blue-600'
                       >
                         <u>web services</u>
                       </Link>
                       , integrating with FastAPI,{' '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/text_to_image.py#L14-L129'
+                        href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/text_to_image.py#L14-L129'
                         className='text-blue-600'
                       >
                         <u>Pydantic</u>
@@ -377,14 +377,14 @@ export default function Page() {
                     <li>
                       create{' '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/deep_research/deep_research.py'
+                        href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/deep_research/deep_research.py'
                         className='text-blue-600'
                       >
                         <u>agentic applications</u>
                       </Link>{' '}
                       that{' '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/tree/main/examples/003-python-speech-to-text'
+                        href='https://github.com/JetBrains/actionengine/tree/main/examples/003-python-speech-to-text'
                         className='text-blue-600'
                       >
                         <u>process media</u>,
@@ -393,14 +393,14 @@ export default function Page() {
                     <li>
                       connect peers flexibly through{' '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/003-python-speech-to-text/run_client.py#L27-L30'
+                        href='https://github.com/JetBrains/actionengine/blob/main/examples/003-python-speech-to-text/run_client.py#L27-L30'
                         className='text-blue-600'
                       >
                         <u>WebSocket</u>
                       </Link>
                       {', '}
                       <Link
-                        href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/server.py#L73-L98'
+                        href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/server.py#L73-L98'
                         className='text-blue-600'
                       >
                         <u>WebRTC</u>
@@ -437,7 +437,7 @@ export default function Page() {
                     <ul content='space' className='list-disc pl-5 mb-2'>
                       <li>
                         <Link
-                          href='https://github.com/stackofcuriosity/actionengine/blob/main/web/app/echo/page.tsx'
+                          href='https://github.com/JetBrains/actionengine/blob/main/web/app/echo/page.tsx'
                           className='text-blue-600'
                         >
                           <u>communicate</u>
@@ -447,7 +447,7 @@ export default function Page() {
                       <li>
                         orchestrate{' '}
                         <Link
-                          href='https://github.com/stackofcuriosity/actionengine/blob/main/web/app/bidi-blobs/page.tsx'
+                          href='https://github.com/JetBrains/actionengine/blob/main/web/app/bidi-blobs/page.tsx'
                           className='text-blue-600'
                         >
                           <u>client-side actions</u>
@@ -457,7 +457,7 @@ export default function Page() {
                       <li>
                         seamlessly handle streams of{' '}
                         <Link
-                          href='https://github.com/stackofcuriosity/actionengine/blob/main/web/src/components/canvas/Genmedia.tsx'
+                          href='https://github.com/JetBrains/actionengine/blob/main/web/src/components/canvas/Genmedia.tsx'
                           className='text-blue-600'
                         >
                           <u>multimodal data</u>
@@ -505,7 +505,7 @@ export default function Page() {
               </Link>{' '}
               generation demo with live progress updates, and{' '}
               <Link
-                href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/text_to_image.py'
+                href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/text_to_image.py'
                 className='text-blue-600'
               >
                 <u>see the code</u>
@@ -556,7 +556,7 @@ export default function Page() {
               &nbsp;seeing its thought process as a separate stream, retrieve
               history later with a session token, and{' '}
               <Link
-                href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/gemini.py'
+                href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/gemini.py'
                 className='text-blue-600'
               >
                 <u>see the code</u>
@@ -584,7 +584,7 @@ export default function Page() {
               by making a plan, running web searches in multiple investigative
               actions, and compiling a final report, and{' '}
               <Link
-                href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/deep_research/deep_research.py'
+                href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/deep_research/deep_research.py'
                 className='text-blue-600'
               >
                 <u>see the code</u>
@@ -636,7 +636,7 @@ export default function Page() {
               </Link>{' '}
               and color them on your command, and{' '}
               <Link
-                href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/actions/gemini_fc.py'
+                href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/actions/gemini_fc.py'
                 className='text-blue-600'
               >
                 <u>see the code</u>
@@ -659,7 +659,7 @@ export default function Page() {
             </h2>
             <p className='mb-2 text-gray-600 leading-[1.5]'>
               Check out{' '}
-              <Link href='https://github.com/stackofcuriosity/actionengine/tree/main/examples/003-python-speech-to-text'>
+              <Link href='https://github.com/JetBrains/actionengine/tree/main/examples/003-python-speech-to-text'>
                 <u>speech to text</u>
               </Link>{' '}
               with RealtimeSTT,{' '}
@@ -672,21 +672,21 @@ export default function Page() {
               or take a look at{' '}
               <Link
                 className='text-blue-600'
-                href='https://github.com/stackofcuriosity/actionengine/tree/main/web'
+                href='https://github.com/JetBrains/actionengine/tree/main/web'
               >
                 <u>these very pages in React</u>
               </Link>
               , a{' '}
               <Link
                 className='text-blue-600'
-                href='https://github.com/stackofcuriosity/actionengine/tree/main/examples/010-service'
+                href='https://github.com/JetBrains/actionengine/tree/main/examples/010-service'
               >
                 <u>Python project that integrates Action Engine with FastAPI</u>
               </Link>{' '}
               or{' '}
               <Link
                 className='text-blue-600'
-                href='https://github.com/stackofcuriosity/actionengine/tree/main/examples/000-actions'
+                href='https://github.com/JetBrains/actionengine/tree/main/examples/000-actions'
               >
                 <u>a starter C++ project</u>
               </Link>
@@ -859,7 +859,7 @@ export default function Page() {
               </Link>
               ,{' '}
               <Link
-                href='https://github.com/stackofcuriosity/actionengine/blob/main/examples/007-python-generative-media/server.py'
+                href='https://github.com/JetBrains/actionengine/blob/main/examples/007-python-generative-media/server.py'
                 className='text-blue-600'
               >
                 <u>servers</u>
@@ -882,9 +882,9 @@ export default function Page() {
             on GitHub at{' '}
             <Link
               className='text-blue-600'
-              href='https://github.com/stackofcuriosity/actionengine'
+              href='https://github.com/JetBrains/actionengine'
             >
-              <u>stackofcuriosity/actionengine</u>
+              <u>JetBrains/actionengine</u>
             </Link>
             . Static non-code assets are provided under the{' '}
             <Link

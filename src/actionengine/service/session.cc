@@ -336,18 +336,20 @@ absl::Status Session::AwaitAllActions_(absl::Duration timeout) {
     mu_.unlock();
     const int selected = thread::SelectUntil(deadline, done_cases);
     mu_.lock();
-    if (selected == -1 && num_actions_done >= done_cases.size()) {
+    if (selected == -1) {
       break;
     }
-    if (selected != -1) {
-      mu_.unlock();
-      actions[selected]->Await(deadline - absl::Now()).IgnoreError();
-      mu_.lock();
-    }
+    // mu_.unlock();
+    // if (absl::Status status = actions[selected]->Await(deadline - absl::Now());
+    //     !status.ok()) {
+    //   LOG(WARNING) << "Action " << actions[selected]->id()
+    //                << " failed: " << status;
+    // }
+    // mu_.lock();
     done_cases[selected] = thread::NonSelectableCase();
     ++num_actions_done;
   }
-  if (absl::Now() >= deadline) {
+  if (absl::Now() >= deadline && num_actions_done < done_cases.size()) {
     return absl::DeadlineExceededError(
         absl::StrCat("Timed out waiting for ",
                      actions.size() - num_actions_done, " actions to finish."));

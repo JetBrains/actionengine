@@ -67,6 +67,6 @@ if [[ "$1" == "--only-rebuild-pybind11" ]]; then
   echo "Skipping Python requirements."
 else
   echo "Installing requirements and Python package and cleaning up."
-  pip3 install -r py/requirements.txt
+#  pip3 install -r py/requirements.txt
   pip3 install --force-reinstall -e .
 fi

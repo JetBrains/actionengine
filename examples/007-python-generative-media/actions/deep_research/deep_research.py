@@ -6,7 +6,6 @@ import traceback
 import actionengine
 from pydantic import BaseModel
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -111,5 +110,16 @@ SCHEMA = actionengine.ActionSchema(
         ("actions", DeepResearchAction),
         ("user_log", "text/plain"),
     ],
-    description="""Conduct deep research on a given topic by creating a plan, investigating each item, and synthesizing findings""",
+    description=(
+        "Conduct a deep research on a given topic by creating a plan, "
+        "investigating each plan item, and synthesizing findings.\n"
+        "\n"
+        "Inputs:\n"
+        "  api_key: The API key for the downstream model.\n"
+        "  topic: The topic to research.\n"
+        "Outputs:\n"
+        "  report: The synthesized report.\n"
+        "  actions: The actions taken during the research process.\n"
+        "  user_log: A log of the research process.\n"
+    ),
 )

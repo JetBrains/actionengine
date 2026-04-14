@@ -128,22 +128,22 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     os.chdir(REPO_ROOT)
     # Build the C++ extensions:
     if (
-            subprocess.Popen(
-                [str(REPO_ROOT / "scripts" / "configure.sh")],
-                env=os.environ.update({"CMAKE_BUILD_TYPE": BUILD_TYPE}),
-            )
+        subprocess.Popen(
+            [str(REPO_ROOT / "scripts" / "configure.sh")],
+            env=os.environ.update({"CMAKE_BUILD_TYPE": BUILD_TYPE}),
+        )
     ).wait() != 0:
         raise RuntimeError("Build failed during configure step.")
 
     if (
-            subprocess.Popen(
-                [
-                    str(REPO_ROOT / "scripts" / "build_python.sh"),
-                    "--only-rebuild-pybind11",
-                ],
-                env=os.environ.update({"CMAKE_BUILD_TYPE": BUILD_TYPE}),
-            ).wait()
-            != 0
+        subprocess.Popen(
+            [
+                str(REPO_ROOT / "scripts" / "build_python.sh"),
+                "--only-rebuild-pybind11",
+            ],
+            env=os.environ.update({"CMAKE_BUILD_TYPE": BUILD_TYPE}),
+        ).wait()
+        != 0
     ):
         raise RuntimeError("Build failed during cmake build step.")
 
@@ -167,14 +167,14 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             [str(p) for p in pythonpaths]
         )
         if (
-                subprocess.Popen(
-                    [
-                        str(REPO_ROOT / "scripts" / "generate_stubs.sh"),
-                        str(pkg_target.parent),
-                    ],
-                    env=os.environ,
-                ).wait()
-                != 0
+            subprocess.Popen(
+                [
+                    str(REPO_ROOT / "scripts" / "generate_stubs.sh"),
+                    str(pkg_target.parent),
+                ],
+                env=os.environ,
+            ).wait()
+            != 0
         ):
             raise RuntimeError("Build failed during stub generation step.")
 
@@ -186,8 +186,8 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             raise RuntimeError("Version not found in pyproject.toml")
 
         dist_info = (
-                temp_dir
-                / f"{NAME_WITH_HYPHEN.replace('-', '_')}-{version}.dist-info"
+            temp_dir
+            / f"{NAME_WITH_HYPHEN.replace('-', '_')}-{version}.dist-info"
         )
         dist_info.mkdir()
 
@@ -202,23 +202,19 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
         )
 
         # Generate METADATA
-        (dist_info / "METADATA").write_text(
-            f"""Metadata-Version: 2.1
+        (dist_info / "METADATA").write_text(f"""Metadata-Version: 2.1
 Name: {NAME_WITH_HYPHEN}
 Version: {version}
 Requires-Dist: {requires_dist}
-"""
-        )
+""")
 
         # Generate WHEEL file
-        (dist_info / "WHEEL").write_text(
-            f"""Wheel-Version: 1.0
+        (dist_info / "WHEEL").write_text(f"""Wheel-Version: 1.0
 Generator: {NAME_WITH_HYPHEN}
 Root-Is-Purelib: false
 Tag: {get_tag()}
 Entry-Points: console_scripts
-"""
-        )
+""")
 
         # Write RECORD file (will list all files)
         record_lines = []

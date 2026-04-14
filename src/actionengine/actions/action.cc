@@ -667,7 +667,7 @@ void ActionExecutionContext::RunHandlerWithPreparationAndCleanup(
 }
 
 void ActionExecutionContext::CommunicateHandlerStatus_(
-    const std::shared_ptr<Action>& action, absl::Status status) {
+    const std::shared_ptr<Action>& action, const absl::Status& status) {
   const ActionBoundResources& resources = action->bound_resources();
   // 1. If a node map is bound, for every unfinalized mapped output (but not __status__):
   //   - if !status.ok(), the output gets this status, and gets flushed
@@ -812,9 +812,9 @@ absl::Status Action::RunInBackground(bool detach) {
     }
     ctx_.detached_ = detach;
     ctx_.progress_state_ = ActionRunState{
-        .fiber = thread::NewTree({}, [this]() {
-          const std::shared_ptr<Action> action = shared_from_this();
-          ctx_.RunHandlerWithPreparationAndCleanup(std::move(handler_), action);
+        .fiber = thread::NewTree({}, [action = shared_from_this()]() {
+          action->ctx_.RunHandlerWithPreparationAndCleanup(
+              std::move(action->handler_), action);
         })};
   }
 
@@ -1151,6 +1151,19 @@ const ActionBoundResources& Action::bound_resources() const {
 ActionBoundResources* Action::mutable_bound_resources() {
   LogWarningIfChangedAfterExec("bound_resources");
   return &bound_resources_;
+}
+
+absl::StatusOr<std::shared_ptr<void>> Action::GetUserData(
+    std::string_view key) const {
+  const auto it = user_data_.find(key);
+  if (it == user_data_.end()) {
+    return absl::NotFoundError(absl::StrCat("Key not found: ", key));
+  }
+  return it->second;
+}
+
+void Action::SetUserData(std::string_view key, std::shared_ptr<void> value) {
+  user_data_[key] = std::move(value);
 }
 
 }  // namespace act
