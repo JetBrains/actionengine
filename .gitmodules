@@ -45,4 +45,4 @@
 [submodule "third_party/proxygen"]
 	path = third_party/proxygen
 	url = https://github.com/hpnkv/proxygen
-	branch = patch-1
+	branch = patch-2
