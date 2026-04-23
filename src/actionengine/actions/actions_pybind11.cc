@@ -35,11 +35,14 @@
 #include <pybind11_abseil/statusor_caster.h>
 
 #include "actionengine/actions/action.h"
+#include "actionengine/data/serialization.h"
 #include "actionengine/nodes/node_map.h"
 #include "actionengine/service/session.h"
 #include "actionengine/util/random.h"
 #include "actionengine/util/status_macros.h"
 #include "actionengine/util/utils_pybind11.h"
+#include "boost/json/value.hpp"
+#include "boost/json/value_from.hpp"
 
 namespace act::pybindings {
 
@@ -168,26 +171,144 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
   };
 }
 
-void BindActionSchemaPort(py::handle scope, std::string_view name) {
-  py::bind_map<absl::flat_hash_map<std::string, ActionSchemaPort>>(
-      scope, "ActionSchemaPortMap");
-  py::class_<ActionSchemaPort>(scope, std::string(name).c_str())
+static absl::Status SetBoostJsonObjectFromPyObject(
+    boost::json::object* absl_nonnull object, py::dict dict) {
+  try {
+    const auto dumps = py::module::import("json").attr("dumps");
+    const auto json_str = dumps(dict).cast<std::string>();
+
+    ASSIGN_OR_RETURN(boost::json::value value, act::ParseJson(json_str));
+    auto value_ptr_as_object = value.try_as_object();
+    if (value_ptr_as_object.has_error()) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Failed to parse json: ", value_ptr_as_object.error().message()));
+    }
+    *object = std::move(*value_ptr_as_object);
+  } catch (const py::cast_error& e) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Failed to cast dict to json: ", e.what()));
+  }
+  return absl::OkStatus();
+}
+
+static absl::StatusOr<py::object> ToPyObject(const boost::json::value& value) {
+  if (value.is_null()) {
+    return py::none();
+  }
+  if (value.is_bool()) {
+    return py::bool_(value.as_bool());
+  }
+  if (value.is_int64()) {
+    return py::int_(value.as_int64());
+  }
+  if (value.is_double()) {
+    return py::float_(value.as_double());
+  }
+  if (value.is_string()) {
+    return py::str(std::string(value.as_string()));
+  }
+  if (value.is_uint64()) {
+    return py::int_(value.as_uint64());
+  }
+  if (value.is_array()) {
+    py::list list;
+    for (const auto& item : value.as_array()) {
+      ASSIGN_OR_RETURN(py::object item_obj, ToPyObject(item));
+      list.append(item_obj);
+    }
+    return list;
+  }
+  if (value.is_object()) {
+    py::dict dict;
+    for (const auto& [key, item] : value.as_object()) {
+      ASSIGN_OR_RETURN(py::object item_obj, ToPyObject(item));
+      dict[py::str(key)] = item_obj;
+    }
+    return dict;
+  }
+  return absl::InvalidArgumentError(
+      "Cannot load boost::json::value into a Python object");
+}
+
+void BindActionPortSchema(py::handle scope, std::string_view name) {
+  // py::bind_map<absl::flat_hash_map<std::string, ActionPortSchema>>(
+  //     scope, "ActionPortSchemaMap");
+  py::class_<ActionPortSchema>(scope, std::string(name).c_str())
       .def(py::init<>())
       .def(py::init([](std::string_view name, std::string_view mimetype,
                        std::string_view description = "",
                        bool required = false) {
-             return ActionSchemaPort{std::string(name), std::string(mimetype),
+             return ActionPortSchema{std::string(name), std::string(mimetype),
                                      std::string(description), required};
            }),
            py::arg("name"), py::arg("mimetype"), py::arg_v("description", ""),
            py::arg_v("required", false))
-      .def_readwrite("name", &ActionSchemaPort::name)
-      .def_readwrite("type", &ActionSchemaPort::type)
-      .def_readwrite("description", &ActionSchemaPort::description)
-      .def_readwrite("extra_type_info", &ActionSchemaPort::extra_type_info)
-      .def_readwrite("required", &ActionSchemaPort::required)
+      .def(
+          "copy",
+          [](const ActionPortSchema& self,
+             bool clear_autofills = false) -> ActionPortSchema {
+            ActionPortSchema copy(self);
+            if (clear_autofills) {
+              copy.autofills = std::nullopt;
+            }
+            return copy;
+          },
+          py::arg_v("clear_autofills", false))
+      .def(
+          "autofill_with",
+          [](ActionPortSchema& self, py::object objects,
+             std::string_view mimetype = "",
+             act::SerializerRegistry* registry = nullptr) -> ActionPortSchema& {
+            if (objects.is_none()) {
+              objects = py::list();
+            }
+            const auto object_list = py::cast<py::list>(objects);
+            const auto to_chunk =
+                py::module_::import("actionengine.data").attr("to_chunk");
+
+            py::list chunks;
+            for (const auto& obj : object_list) {
+              py::object chunk = to_chunk(obj, py::str(mimetype), registry);
+              chunks.append(chunk);
+            }
+            self.autofills.emplace();
+            self.autofills->reserve(chunks.size());
+            for (auto& chunk : chunks) {
+              self.autofills->push_back(py::cast<Chunk>(std::move(chunk)));
+            }
+            return self;
+          },
+          py::arg("chunks"), py::arg_v("mimetype", ""),
+          py::arg_v("registry", py::none()), py::return_value_policy::reference)
+      .def_property_readonly("autofills",
+                             [](const ActionPortSchema& self)
+                                 -> const std::optional<std::vector<Chunk>>& {
+                               return self.autofills;
+                             })
+      .def_property(
+          "json_schema",
+          [](const ActionPortSchema& self) -> absl::StatusOr<py::dict> {
+            ASSIGN_OR_RETURN(py::dict dict, ToPyObject(self.json_schema));
+            if (!dict.contains("title")) {
+              dict["title"] = py::str(self.name);
+            }
+            if (!dict.contains("description")) {
+              dict["description"] = py::str(self.description);
+            }
+            return dict;
+          },
+          [](ActionPortSchema& self, py::dict schema) -> absl::Status {
+            RETURN_IF_ERROR(SetBoostJsonObjectFromPyObject(&self.json_schema,
+                                                           std::move(schema)));
+            return absl::OkStatus();
+          })
+      .def_readwrite("name", &ActionPortSchema::name)
+      .def_readwrite("type", &ActionPortSchema::type)
+      .def_readwrite("description", &ActionPortSchema::description)
+      .def_readwrite("unary", &ActionPortSchema::unary)
+      .def_readwrite("required", &ActionPortSchema::required)
       // .def("__repr__",
-      //      [](const ActionSchemaPort& def) { return absl::StrCat(def); })
+      //      [](const ActionPortSchema& def) { return absl::StrCat(def); })
       .doc() = "A port of an action schema.";
 }
 
@@ -196,38 +317,15 @@ void BindActionSchema(py::handle scope, std::string_view name) {
       .def(py::init<>())
       // .def(MakeSameObjectRefConstructor<ActionSchema>())
       .def(py::init([](std::string_view action_name,
-                       const std::vector<NameAndMimetype>& inputs,
-                       const std::vector<NameAndMimetype>& outputs,
+                       const std::vector<ActionPortSchema>& inputs,
+                       const std::vector<ActionPortSchema>& outputs,
                        std::string_view description = "") {
-             absl::flat_hash_map<std::string, ActionSchemaPort> input_ports;
-             input_ports.reserve(inputs.size());
-             for (auto& [input_name, mimetype] : inputs) {
-               input_ports[input_name] = ActionSchemaPort{input_name, mimetype};
-             }
-             absl::flat_hash_map<std::string, ActionSchemaPort> output_ports;
-             output_ports.reserve(outputs.size());
-             for (auto& [output_name, mimetype] : outputs) {
-               output_ports[output_name] =
-                   ActionSchemaPort{output_name, mimetype};
-             }
-             return ActionSchema(
-                 std::string(action_name), std::move(input_ports),
-                 std::move(output_ports), std::string(description));
-           }),
-           py::kw_only(), py::arg("name"),
-           py::arg_v("inputs", std::vector<NameAndMimetype>()),
-           py::arg_v("outputs", std::vector<NameAndMimetype>()),
-           py::arg_v("description", ""))
-      .def(py::init([](std::string_view action_name,
-                       const std::vector<ActionSchemaPort>& inputs,
-                       const std::vector<ActionSchemaPort>& outputs,
-                       std::string_view description = "") {
-             absl::flat_hash_map<std::string, ActionSchemaPort> input_ports;
+             absl::flat_hash_map<std::string, ActionPortSchema> input_ports;
              input_ports.reserve(inputs.size());
              for (const auto& port : inputs) {
                input_ports[port.name] = port;
              }
-             absl::flat_hash_map<std::string, ActionSchemaPort> output_ports;
+             absl::flat_hash_map<std::string, ActionPortSchema> output_ports;
              output_ports.reserve(outputs.size());
              for (const auto& port : outputs) {
                output_ports[port.name] = port;
@@ -238,11 +336,94 @@ void BindActionSchema(py::handle scope, std::string_view name) {
            }),
            py::kw_only(), py::arg("name"), py::arg_v("inputs", py::none()),
            py::arg_v("outputs", py::none()), py::arg_v("description", ""))
+      .def(
+          "copy",
+          [](const ActionSchema& self, bool clear_autofills = false) {
+            ActionSchema copy = self;
+            if (clear_autofills) {
+              for (auto& [_, port] : copy.inputs) {
+                port.autofills = std::nullopt;
+              }
+              for (auto& [_, port] : copy.outputs) {
+                port.autofills = std::nullopt;
+              }
+            }
+            return copy;
+          },
+          py::arg_v("clear_autofills", false))
+      .def(
+          "map_outputs_to_json_fields",
+          [](ActionSchema& self, py::handle map_or_none = py::none())
+              -> absl::StatusOr<std::reference_wrapper<ActionSchema>> {
+            try {
+              py::dict map;
+              if (!map_or_none.is_none()) {
+                map = py::cast<py::dict>(map_or_none);
+              }
+              for (const auto& [output_name, json_field] : map) {
+                RETURN_IF_ERROR(
+                    self.MapOutputToJsonField(output_name.cast<std::string>(),
+                                              json_field.cast<std::string>()));
+              }
+              return std::ref(self);
+            } catch (const py::cast_error& e) {
+              return absl::InvalidArgumentError(absl::StrCat(
+                  "Failed to cast map to Dict[str, str]: ", e.what()));
+            }
+          },
+          py::arg_v("map", py::none()))
+      .def(
+          "get_json_field_for_output",
+          [](const ActionSchema& self,
+             std::string_view output_name) -> std::optional<std::string> {
+            return self.GetJsonFieldForOutput(output_name);
+          },
+          py::arg("output_name"))
+      .def("clear_json_field_mapping", &ActionSchema::ClearJsonFieldMapping)
+      .def(
+          "set_python_type_for_port",
+          [](ActionSchema& self, std::string_view port, py::type type) {
+            if (self.user_data == nullptr) {
+              self.user_data = std::shared_ptr<py::dict>(
+                  new py::dict, [](const py::dict* dict) {
+                    py::gil_scoped_acquire gil;
+                    delete dict;
+                  });
+            }
+            const std::shared_ptr<py::dict> dict =
+                std::static_pointer_cast<py::dict>(self.user_data);
+            (*dict)[py::str(std::string(port))] = type;
+          },
+          py::arg("port"), py::arg("type"))
+      .def("get_python_type_for_port",
+           [](const ActionSchema& self, std::string_view port) -> py::object {
+             if (self.user_data == nullptr) {
+               return py::none();
+             }
+             const std::shared_ptr<py::dict> dict =
+                 std::static_pointer_cast<py::dict>(self.user_data);
+             if (dict->contains(py::str(std::string(port)))) {
+               return (*dict)[py::str(std::string(port))];
+             }
+             return py::none();
+           })
+      .def("__getitem__",
+           [](ActionSchema& self, std::string_view key)
+               -> absl::StatusOr<std::reference_wrapper<ActionPortSchema>> {
+             if (self.HasInput(key)) {
+               return std::ref(self.inputs[key]);
+             }
+             if (self.HasOutput(key)) {
+               return std::ref(self.outputs[key]);
+             }
+             return absl::NotFoundError(
+                 absl::StrCat("Port '", key, "' not found."));
+           })
       .def_readwrite("name", &ActionSchema::name)
       .def(
           "input",
           [](ActionSchema& self, std::string_view name)
-              -> absl::StatusOr<std::reference_wrapper<ActionSchemaPort>> {
+              -> absl::StatusOr<std::reference_wrapper<ActionPortSchema>> {
             const auto it = self.inputs.find(name);
             if (it == self.inputs.end()) {
               return absl::NotFoundError(
@@ -262,7 +443,7 @@ void BindActionSchema(py::handle scope, std::string_view name) {
       .def(
           "output",
           [](ActionSchema& self, std::string_view name)
-              -> absl::StatusOr<std::reference_wrapper<ActionSchemaPort>> {
+              -> absl::StatusOr<std::reference_wrapper<ActionPortSchema>> {
             const auto it = self.outputs.find(name);
             if (it == self.outputs.end()) {
               return absl::NotFoundError(
@@ -289,6 +470,40 @@ void BindActionRegistry(py::handle scope, std::string_view name) {
   py::classh<ActionRegistry>(scope, std::string(name).c_str())
       .def(py::init([]() { return std::make_shared<ActionRegistry>(); }))
       .def(MakeSameObjectRefConstructor<ActionRegistry>())
+      .def(
+          "copy",
+          [](std::shared_ptr<ActionRegistry>& self, bool clear_autofills) {
+            auto copy = std::make_shared<ActionRegistry>();
+            const std::vector<std::string> registered_actions =
+                self->ListRegisteredActions();
+            for (const auto& action_name : registered_actions) {
+              absl::StatusOr<std::reference_wrapper<ActionSchema>> schema_ref =
+                  self->GetSchema(action_name);
+              absl::StatusOr<std::reference_wrapper<ActionHandler>>
+                  handler_ref = self->GetHandler(action_name);
+
+              ActionSchema schema;
+              ActionHandler handler;
+              if (schema_ref.ok()) {
+                schema = *schema_ref;
+                if (clear_autofills) {
+                  for (auto& [_, port] : schema.inputs) {
+                    port.autofills = std::nullopt;
+                  }
+                  for (auto& [_, port] : schema.outputs) {
+                    port.autofills = std::nullopt;
+                  }
+                }
+              }
+              if (handler_ref.ok()) {
+                handler = handler_ref.value();
+              }
+              copy->Register(action_name, std::move(schema),
+                             std::move(handler));
+            }
+            return copy;
+          },
+          py::arg_v("clear_autofills", true))
       .def(
           "register",
           [](const std::shared_ptr<ActionRegistry>& self, std::string_view name,
@@ -336,12 +551,13 @@ void BindActionRegistry(py::handle scope, std::string_view name) {
       .def(
           "get_schema",
           [](const std::shared_ptr<ActionRegistry>& self,
-             std::string_view action_name) -> absl::StatusOr<ActionSchema> {
-            ASSIGN_OR_RETURN(const ActionSchema& schema,
+             std::string_view action_name)
+              -> absl::StatusOr<std::reference_wrapper<ActionSchema>> {
+            ASSIGN_OR_RETURN(ActionSchema & schema,
                              self->GetSchema(action_name));
             return schema;
           },
-          py::arg("name"), py::return_value_policy::copy)
+          py::arg("name"), py::return_value_policy::reference)
       .def("list_registered_actions",
            [](const std::shared_ptr<ActionRegistry>& self) {
              return self->ListRegisteredActions();
@@ -628,7 +844,7 @@ py::module_ MakeActionsModule(py::module_ scope, std::string_view module_name) {
   py::module_ actions = scope.def_submodule(std::string(module_name).c_str(),
                                             "ActionEngine Actions interface.");
 
-  BindActionSchemaPort(actions, "ActionSchemaPort");
+  BindActionPortSchema(actions, "ActionPortSchema");
   BindActionSchema(actions, "ActionSchema");
   BindActionRegistry(actions, "ActionRegistry");
   BindAction(actions, "Action");

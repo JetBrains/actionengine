@@ -35,7 +35,7 @@ from actionengine.sdk import llm_tool
 
 Action = actions.Action
 ActionSchema = actions.ActionSchema
-ActionSchemaPort = actions.ActionSchemaPort
+ActionPortSchema = actions.ActionPortSchema
 ActionMessage = data.ActionMessage
 ActionRegistry = actions.ActionRegistry
 

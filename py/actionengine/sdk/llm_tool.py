@@ -19,8 +19,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 import actionengine.data  # noqa
-from actionengine.actions import Action, ActionSchema, ActionHandler
+import actionengine.logging
+from actionengine.actions import (
+    ActionSchema,
+    ActionRegistry,
+)
 from actionengine.async_node import AsyncNode
+
+ALLOWED_TOOLS_HEADER = "x-ae-allowed-tools"
+LLM_HEADER = "x-ae-llm"
+LLM_API_KEY_HEADER = "x-ae-llm-api-key"
+
+_LOGGER = actionengine.logging.get_logger()
 
 
 class LLMToolInputProperty(BaseModel):
@@ -50,7 +60,27 @@ class LLMToolInputSchema(BaseModel):
     )
 
 
-def _ae_type_to_json_schema_type(ae_type: str | type) -> str:
+def _ae_type_to_json_schema_type(
+    mimetype: str, ae_type: str | type = None
+) -> str:
+    if mimetype == "" and ae_type is None:
+        return "null"
+
+    if ae_type is None:
+        if mimetype.startswith("text/"):
+            return "string"
+        if mimetype.startswith("image/"):
+            return "string"
+        if mimetype.startswith("application/json"):
+            return "object"
+        if mimetype.startswith("application/octet-stream"):
+            return "string"
+        if mimetype.startswith("application/x-msgpack"):
+            return "object"
+        if mimetype.startswith("application/x-protobuf"):
+            return "object"
+        return "string"
+
     if ae_type is dict:
         return "object"
 
@@ -69,20 +99,10 @@ def _ae_type_to_json_schema_type(ae_type: str | type) -> str:
     if ae_type is bool:
         return "boolean"
 
-    if ae_type is None:
-        return "null"
-
     if isinstance(ae_type, type) and issubclass(ae_type, BaseModel):
         return "object"
 
     if not isinstance(ae_type, str):
-        return "object"
-
-    if ae_type.startswith("text/"):
-        return "string"
-    if ae_type.startswith("image/"):
-        return "string"
-    if ae_type.startswith("application/json"):
         return "object"
 
     return "object"
@@ -93,31 +113,37 @@ class LLMToolSchema(BaseModel):
     def from_action_schema(action_schema: ActionSchema):
         name = action_schema.name
         description = action_schema.description
-        input_schema = LLMToolInputSchema()
+        input_schema = {"type": "object", "properties": dict()}
         required = []
 
         for input_name in action_schema.inputs():
-            python_type = action_schema.get_python_type_for_port(input_name)
-            json_schema_type = _ae_type_to_json_schema_type(python_type)
+            port = action_schema.input(input_name)
+            if port.autofills is not None:
+                continue
 
-            nested_props = None
+            if port.required:
+                required.append(input_name)
+            python_type = action_schema.get_python_type_for_port(input_name)
+            input_schema["properties"][input_name] = {
+                "type": "array",
+                "description": port.description,
+            }
+            if port.unary:
+                input_schema["properties"][input_name]["maxItems"] = 1
+            if port.required:
+                input_schema["properties"][input_name]["minItems"] = 1
             if isinstance(python_type, type) and issubclass(
                 python_type, BaseModel
             ):
-                nested_props = python_type.model_json_schema()["properties"]
-                nested_props_with_descriptions = dict()
-                for prop_name, prop in nested_props.items():
-                    prop_with_desc = {"type": prop["type"]}
-                    prop_with_desc["description"] = python_type.model_fields[
-                        prop_name
-                    ].description
-                    nested_props_with_descriptions[prop_name] = prop_with_desc
+                input_schema["properties"][input_name][
+                    "items"
+                ] = python_type.model_json_schema()
 
-            input_schema.properties[input_name] = LLMToolInputProperty(
-                type=json_schema_type,
-                description=action_schema.input(input_name).description,
-                properties=nested_props,
-            )
+            if port.type.startswith("text/"):
+                input_schema["properties"][input_name]["items"] = {
+                    "type": "string",
+                    "format": "text",
+                }
 
         return LLMToolSchema(
             name=name,
@@ -132,7 +158,7 @@ class LLMToolSchema(BaseModel):
         default=True,
         description="Whether the tool supports eager input streaming.",
     )
-    input_schema: LLMToolInputSchema = Field(
+    input_schema: dict[str, Any] = Field(
         description="The input schema for the tool."
     )
     required: list[str] = Field(
@@ -147,46 +173,26 @@ class LLMToolSchema(BaseModel):
 class LLMTool:
     _action_schema: ActionSchema
     _tool_schema: LLMToolSchema
-    _autofills: dict[str, Any]
-    _output_to_field: dict[str, str]
-    _handler: ActionHandler
-    _excluded_inputs: set[str]
 
-    # TODO: input exclusion logic and autofilling should be refactored
-    #       into (C++) Action to enable that functionality when using native
-    #       Actions.
-
-    def __init__(
-        self,
-        schema: ActionSchema,
-        handler: ActionHandler,
-        excluded_inputs: list[str] | None = None,
-    ):
+    def __init__(self, schema: ActionSchema):
         self._action_schema = schema
         self._tool_schema = LLMToolSchema.from_action_schema(schema)
-        self._autofills = dict()
-        self._output_to_field = dict()
-        self._handler = handler
-
-        self._excluded_inputs = set()
-        excluded_inputs = excluded_inputs or []
-        for name in excluded_inputs:
-            if name not in self._action_schema.inputs():
-                raise ValueError(f"Input {name} not found in action schema.")
-            self._excluded_inputs.add(name)
 
     def get_schema(self) -> LLMToolSchema:
         schema = self._tool_schema.model_copy(deep=True)
-        for input_name in self._excluded_inputs:
-            schema.input_schema.properties.pop(input_name)
+        for input_name in self._action_schema.inputs():
+            input_port = self._action_schema.input(input_name)
+            # if autofills are set, the input should be excluded from the
+            # tool schema.
+            if input_port.autofills is not None:
+                if input_name in schema.input_schema["properties"]:
+                    schema.input_schema["properties"].pop(input_name)
         return schema
 
     def map_output_to_field(self, output_name: str, field_name: str):
-        if output_name not in self._action_schema.outputs():
-            raise ValueError(
-                f"Output {output_name} not found in action schema."
-            )
-        self._output_to_field[output_name] = field_name
+        self._action_schema.map_outputs_to_json_fields(
+            {output_name: field_name}
+        )
 
     def _reduce_chunked_output(
         self, output_name: str, chunked_output: list[Any]
@@ -230,82 +236,76 @@ class LLMTool:
     async def run(
         self,
         input_dict: dict[str, Any] | None = None,
+        registry: ActionRegistry | None = None,
         timeout: float = -1.0,
+        headers: dict[str, str | bytes] = None,
     ):
         input_dict = input_dict or dict()
         try:
-            return await self._run(input_dict, timeout)
+            return await self._run(input_dict, registry, timeout, headers)
         finally:
             pass
-
-    def clear_autofills(self):
-        self._autofills = dict()
 
     async def _run(
         self,
         input_dict: dict[str, Any],
+        registry: ActionRegistry,
         timeout: float = -1.0,
+        headers: dict[str, str | bytes] = None,
     ):
         started_at = time.perf_counter()
 
-        if self._excluded_inputs:
-            for name in self._excluded_inputs:
-                if name not in self._autofills:
-                    raise ValueError(
-                        f"Input {name} is excluded from exposed tool schema, "
-                        f"but not autofilled: this would freeze the tool."
-                    )
+        all_input_names = set(self._action_schema.inputs())
 
-        # autofills take priority over LLM-supplied input
-        input_dict = input_dict | self._autofills
-        for name, autofill in self._autofills.items():
-            assert (
-                input_dict[name] == autofill
-            ), f"Input {name} does not match autofill, this might be a security issue."
-
-        required_input_names = list(self._action_schema.inputs())
-        if len(input_dict) > len(required_input_names):
-            raise ValueError(
-                f"Too many input fields. Expected {required_input_names}, got {input_dict.keys()}"
-            )
-
-        if len(input_dict) < len(required_input_names):
-            raise ValueError(
-                f"Too few input fields. Expected {required_input_names}, got {input_dict.keys()}"
-            )
-
-        for name, value in input_dict.items():
-            if name not in required_input_names:
+        for provided_name in input_dict:
+            if provided_name not in all_input_names:
                 raise ValueError(
-                    f"Input field {name} not found in action schema."
+                    f"Input field {provided_name} not found in action schema."
+                )
+            if self._action_schema.input(provided_name).autofills is not None:
+                raise ValueError(
+                    f"The input field {provided_name} is not allowed to be filled."
                 )
 
-        if not self._output_to_field:
-            outputs = list(self._action_schema.outputs())
-            if outputs:
-                if len(outputs) == 1:
-                    self.map_output_to_field(list(outputs)[0], "$")
-                else:
-                    for output_name in outputs:
-                        self.map_output_to_field(output_name, output_name)
+        resolvable_input_names = set(input_dict.keys())
+        for input_name in all_input_names:
+            input_port = self._action_schema.input(input_name)
+            if input_port.autofills is not None:
+                resolvable_input_names.add(input_name)
+        non_resolvable_input_names = all_input_names - resolvable_input_names
+        if non_resolvable_input_names:
+            raise ValueError(
+                f"The input fields {non_resolvable_input_names} are not "
+                f"resolvable: neither found in the input dict nor in the "
+                f"action schema autofills."
+            )
+        if len(resolvable_input_names) > len(all_input_names):
+            excess_input_names = resolvable_input_names - all_input_names
+            raise ValueError(f"Excess input fields: {excess_input_names}.")
 
-        n_whole_response_maps = 0
-        for output_name, field_name in self._output_to_field.items():
-            if field_name == "$":
-                n_whole_response_maps += 1
-                continue
-            if n_whole_response_maps > 1:
-                raise ValueError(
-                    "Multiple output fields mapped to whole response. Only one is allowed."
-                )
-
-        action = (
-            Action.from_schema(self._action_schema)
-            .bind_handler(self._handler)
-            .run()
+        action = registry.make_action(self._action_schema.name).bind_registry(
+            registry
         )
-        for name, value in input_dict.items():
-            await action[name].put_and_finalize(value)
+
+        headers = headers or dict()
+        for header_name, header_value in headers.items():
+            action.set_header(header_name, header_value)
+        action.run()
+
+        for input_name in self._action_schema.inputs():
+            input_port = self._action_schema.input(input_name)
+            if input_port.autofills is not None:
+                for chunk in input_port.autofills:
+                    await action.get_input(input_name).put(chunk)
+                await action.get_input(input_name).finalize()
+            else:
+                if not isinstance(input_dict[input_name], (list, tuple)):
+                    raise ValueError(
+                        f"Input field {input_name} must be a list or tuple."
+                    )
+                for chunk in input_dict[input_name]:
+                    await action.get_input(input_name).put(chunk)
+                await action.get_input(input_name).finalize()
 
         output_lists = defaultdict(list)
 
@@ -315,20 +315,32 @@ class LLMTool:
             else timeout - (time.perf_counter() - started_at)
         )
         await action.wait_until_complete(timeout_left)
-        for output_name, field_name in self._output_to_field.items():
+        for output_name in self._action_schema.outputs():
+            field_name = self._action_schema.get_json_field_for_output(
+                output_name
+            )
+            if field_name is None:
+                continue
+
             timeout_left = (
                 -1.0
                 if timeout == -1.0
                 else timeout - (time.perf_counter() - started_at)
             )
             await LLMTool._read_output(
-                action[output_name],
+                action.get_output(output_name),
                 output_lists[field_name],
                 timeout_left,
             )
 
         output_values = dict()
-        for output_name, field_name in self._output_to_field.items():
+        for output_name in self._action_schema.outputs():
+            field_name = self._action_schema.get_json_field_for_output(
+                output_name
+            )
+            if field_name is None:
+                continue
+
             if field_name == "$":
                 return self._reduce_chunked_output(
                     output_name, output_lists[field_name]
@@ -338,6 +350,3 @@ class LLMTool:
             )
 
         return output_values
-
-    def autofill(self, name: str, value: Any):
-        self._autofills[name] = value

@@ -20,8 +20,23 @@
 #include <absl/strings/str_cat.h>
 
 #include "actionengine/data/types.h"
+#include "boost/json/array.hpp"
+#include "boost/json/object.hpp"
+#include "boost/json/parse.hpp"
+#include "boost/json/string.hpp"
+#include "boost/json/value.hpp"
 
 namespace act {
+
+absl::StatusOr<boost::json::value> ParseJson(std::string_view serialized_json) {
+  boost::system::error_code ec;
+  boost::json::value json_value = boost::json::parse(serialized_json, ec);
+  if (ec) {
+    return absl::InternalError(
+        absl::StrCat("Failed to parse JSON: ", ec.message()));
+  }
+  return json_value;
+}
 
 absl::StatusOr<ActionMessage> ActionSchema::GetActionMessage(
     std::string_view action_id) const {
@@ -54,6 +69,40 @@ absl::StatusOr<ActionMessage> ActionSchema::GetActionMessage(
       .inputs = input_parameters,
       .outputs = output_parameters,
   };
+}
+
+absl::Status ActionSchema::MapOutputToJsonField(std::string_view output_name,
+                                                std::string_view json_field) {
+  if (!HasOutput(output_name)) {
+    return absl::InvalidArgumentError(absl::StrFormat(
+        "Output '%s' does not exist in the action schema.", output_name));
+  }
+  if (json_field == "$") {
+    for (const auto& [output, field] : output_to_json_field) {
+      if (field == "$" && output != output_name) {
+        return absl::InvalidArgumentError(
+            absl::StrFormat("Cannot map output '%s' to '$' because '%s' "
+                            "already maps to the whole body.",
+                            output_name, output));
+      }
+    }
+  }
+  output_to_json_field[output_name] = json_field;
+  return absl::OkStatus();
+}
+
+std::optional<std::string> ActionSchema::GetJsonFieldForOutput(
+    std::string_view output_name) const {
+  // Map single-output ports to the whole body
+  if (outputs.size() == 1 && output_to_json_field.empty() &&
+      HasOutput(output_name)) {
+    return "$";
+  }
+  if (const auto it = output_to_json_field.find(output_name);
+      it != output_to_json_field.end()) {
+    return it->second;
+  }
+  return std::nullopt;
 }
 
 }  // namespace act

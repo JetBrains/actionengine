@@ -20,8 +20,28 @@ import traceback
 from actionengine.actions import Action
 from actionengine.sdk import interaction
 from actionengine.sdk.google.client import get_gemini_client
+from actionengine.sdk.llm_tool import (
+    LLMToolSchema,
+    LLMToolInputProperty,
+)
 from actionengine.sdk.rehydrate_interaction import REHYDRATE_INTERACTION_SCHEMA
 from google.genai import types
+
+
+def to_gemini_tool(schema: LLMToolSchema) -> types.Tool:
+    parameters = types.Schema()
+    parameters.type = "OBJECT"
+    parameters.required = schema.required
+    param_schema: LLMToolInputProperty
+    for param_name, param_schema in schema.input_schema.properties.items():
+        param = parameters.properties[param_name] = types.Schema()
+        param.type = param_schema.type.upper()
+    return types.Tool(
+        function_declarations=types.FunctionDeclaration(
+            name=schema.name,
+            description=schema.description,
+        ),
+    )
 
 
 async def generate_content_gemini(action: Action):
@@ -110,7 +130,8 @@ async def generate_content_gemini(action: Action):
                                 await action["output"].put(part.text)
                                 output += part.text
                             else:
-                                await action["thoughts"].put(part.text)
+                                if not thoughts_finalised:
+                                    await action["thoughts"].put(part.text)
                                 thought += part.text
                 await action["output"].finalize()
             finally:

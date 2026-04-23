@@ -156,21 +156,25 @@ void BindAsyncNode(py::handle scope, std::string_view name) {
             //       be pooled.
             thread::Detach(
                 {}, [future, timeout_duration, node = self]() mutable {
+                  auto done = std::make_shared<thread::PermanentEvent>();
                   {
                     py::gil_scoped_acquire gil;
                     thread::Fiber* current_fiber = thread::Fiber::Current();
-                    future.attr("add_done_callback")(
-                        py::cpp_function([current_fiber](py::handle future) {
+                    future.attr("add_done_callback")(py::cpp_function(
+                        [current_fiber, done](py::handle future) {
                           py::gil_scoped_acquire gil;
                           if (!future.attr("cancelled")().cast<bool>()) {
                             return;
                           }
-                          current_fiber->Cancel();
+                          if (!done->HasBeenNotified()) {
+                            current_fiber->Cancel();
+                          }
                         }));
                   }
 
                   absl::StatusOr<std::optional<NodeFragment>> result =
                       node->Next<NodeFragment>(timeout_duration);
+                  done->Notify();
 
                   py::gil_scoped_acquire gil;
                   absl::Status status;
@@ -229,21 +233,25 @@ void BindAsyncNode(py::handle scope, std::string_view name) {
             //       be pooled.
             thread::Detach(
                 {}, [future, timeout_duration, node = self]() mutable {
+                  auto done = std::make_shared<thread::PermanentEvent>();
                   {
                     py::gil_scoped_acquire gil;
                     thread::Fiber* current_fiber = thread::Fiber::Current();
-                    future.attr("add_done_callback")(
-                        py::cpp_function([current_fiber](py::handle future) {
+                    future.attr("add_done_callback")(py::cpp_function(
+                        [current_fiber, done](py::handle future) {
                           py::gil_scoped_acquire gil;
                           if (!future.attr("cancelled")().cast<bool>()) {
                             return;
                           }
-                          current_fiber->Cancel();
+                          if (!done->HasBeenNotified()) {
+                            current_fiber->Cancel();
+                          }
                         }));
                   }
 
                   absl::StatusOr<std::optional<Chunk>> result =
                       node->Next<Chunk>(timeout_duration);
+                  done->Notify();
 
                   py::gil_scoped_acquire gil;
                   absl::Status status;

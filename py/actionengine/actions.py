@@ -19,7 +19,9 @@ import inspect
 from typing import Any
 from typing import Awaitable
 from typing import Callable
+from typing import Sequence
 
+import actionengine
 from actionengine import _C
 from actionengine import async_node
 from actionengine import node_map as eg_node_map
@@ -64,7 +66,7 @@ def wrap_handler(handler: ActionHandler) -> ActionHandler:
         return inner
 
 
-ActionSchemaPort = _C.actions.ActionSchemaPort
+ActionPortSchema = _C.actions.ActionPortSchema
 
 
 class ActionSchema(_C.actions.ActionSchema):
@@ -89,8 +91,6 @@ class ActionSchema(_C.actions.ActionSchema):
           inputs: The inputs of the action definition.
           outputs: The outputs of the action definition.
         """
-        self._py_inputs = dict()
-        self._py_outputs = dict()
 
         input_ports = []
         output_ports = []
@@ -101,14 +101,14 @@ class ActionSchema(_C.actions.ActionSchema):
                 description = ""
             else:
                 input_name, input_type, description = input_tuple
-
-            self._py_inputs[input_name] = input_type
+            if isinstance(input_type, type):
+                self.set_python_type_for_port(input_name, input_type)
             if isinstance(input_type, type) and issubclass(
                 input_type, BaseModel
             ):
                 input_type = "__BaseModel__"
             input_ports.append(
-                ActionSchemaPort(input_name, input_type, description)
+                ActionPortSchema(input_name, input_type, description)
             )
 
         for output_tuple in outputs:
@@ -118,13 +118,14 @@ class ActionSchema(_C.actions.ActionSchema):
             else:
                 output_name, output_type, description = output_tuple
 
-            self._py_outputs[output_name] = output_type
+            if isinstance(output_type, type):
+                self.set_python_type_for_port(output_name, output_type)
             if isinstance(output_type, type) and issubclass(
                 output_type, BaseModel
             ):
                 output_type = "__BaseModel__"
             output_ports.append(
-                ActionSchemaPort(output_name, output_type, description)
+                ActionPortSchema(output_name, output_type, description)
             )
 
         super().__init__(
@@ -135,13 +136,7 @@ class ActionSchema(_C.actions.ActionSchema):
         )
 
     def get_python_type_for_port(self, name: str):
-        if name in self._py_inputs:
-            return self._py_inputs[name]
-
-        if name in self._py_outputs:
-            return self._py_outputs[name]
-
-        raise ValueError(f"Unknown port name: {name}")
+        return super().get_python_type_for_port(name)
 
 
 class ActionRegistry(_C.actions.ActionRegistry):
@@ -204,13 +199,12 @@ class ActionRegistry(_C.actions.ActionRegistry):
             super().make_action(
                 name,
                 action_id,
-                node_map,
+                node_map or actionengine.NodeMap(),
                 stream,
                 session,
             ),
         )
 
-        action._node_map = node_map
         action._stream = stream
         action._session = session
 
@@ -224,6 +218,7 @@ class Action(_C.actions.Action):
     def from_schema(
         schema: ActionSchema,
         action_id: str = "",
+        handler: ActionHandler | None = None,
     ):
         """Creates an action from a schema."""
         action = utils.wrap_pybind_object(
@@ -231,6 +226,8 @@ class Action(_C.actions.Action):
             _C.actions.Action(schema, action_id),
         )
         action.bind_node_map(NodeMap())
+        if handler is not None:
+            action.bind_handler(handler)
         return action
 
     def _add_python_specific_attributes(self):

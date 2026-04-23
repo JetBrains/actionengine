@@ -28,7 +28,7 @@ class CreateMessageConfig(BaseModel):
 
 
 GENERATE_CONTENT_CLAUDE_SCHEMA = ActionSchema(
-    name="generate_content",
+    name="generate_content_claude",
     inputs=[
         ("api_key", "text/plain"),
         ("chat_input", "text/plain"),

@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import asyncio
-import logging
 import os
 
+import actionengine.logging
 from actionengine.actions import Action
+from actionengine.data import to_chunk
 from actionengine.sdk.anthropic.generate_content_claude import (
     GENERATE_CONTENT_CLAUDE_SCHEMA,
 )
@@ -30,11 +31,11 @@ from actionengine.sdk.ollama.generate_content_ollama import (
     GENERATE_CONTENT_OLLAMA_SCHEMA,
 )
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = actionengine.logging.get_logger().getChild("generate_content")
 
 
 async def generate_content(action: Action):
-    _LOGGER.debug("Running generate_content.")
+    _LOGGER.info("started.")
 
     api_key = await action["api_key"].consume(timeout=3.0)
     if not api_key:
@@ -52,6 +53,9 @@ async def generate_content(action: Action):
     if api_key == "claude":
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         provider = "claude"
+
+    if api_key is None:
+        raise ValueError(f"API key is required.")
 
     if not provider:
         raise ValueError(f"Could not resolve LLM provider for API key.")
@@ -81,7 +85,10 @@ async def generate_content(action: Action):
         case "claude":
             from actionengine.sdk.anthropic.generate_content_claude_handler import (
                 generate_content_claude,
+                CreateMessageConfig,
             )
+
+            to_chunk(CreateMessageConfig())
 
             handler = generate_content_claude
         case "ollama":
@@ -93,6 +100,10 @@ async def generate_content(action: Action):
 
     if handler is None:
         raise RuntimeError(f"Could not resolve handler for {provider}.")
+
+    _LOGGER.info(
+        "resolved provider: " + provider + " and handler: " + handler.__name__
+    )
 
     generate = (
         Action.from_schema(schema)

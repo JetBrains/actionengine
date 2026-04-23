@@ -37,6 +37,7 @@ target_link_libraries(
         act::net
         act::nodes
         act::stores
+        Boost::json
 )
 
 # ------------------------------------------------------------------
@@ -64,6 +65,7 @@ target_link_libraries(
         actActionsPybind11 PRIVATE
         absl::flat_hash_map
         absl::log
+        Boost::json
         ${ACTIONENGINE_PYBIND11_DEPENDENCIES}
 )
 target_include_directories(

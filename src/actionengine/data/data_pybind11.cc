@@ -117,14 +117,12 @@ absl::StatusOr<Chunk> PyToChunk(py::handle obj, std::string_view mimetype,
 
   if (mimetype_str.empty()) {
     {
-      py::gil_scoped_release release;  // Release GIL for serialization.
       return ConvertTo<Chunk>(obj);
     }
   }
 
   absl::StatusOr<Chunk> serialized_chunk;
   {
-    py::gil_scoped_release release;
     serialized_chunk = ToChunk(std::any(obj), mimetype_str, registry);
     if (!serialized_chunk.ok()) {
       ASSIGN_OR_RETURN(std::any args_as_any,
@@ -142,10 +140,7 @@ absl::StatusOr<Chunk> PyToChunk(py::handle obj, std::string_view mimetype,
 absl::StatusOr<py::object> PyFromChunk(Chunk chunk, std::string_view mimetype,
                                        const SerializerRegistry* registry) {
   absl::StatusOr<std::any> obj;
-  {
-    py::gil_scoped_release release;  // Release GIL for deserialization.
-    obj = FromChunk(std::move(chunk), mimetype, registry);
-  }
+  { obj = FromChunk(std::move(chunk), mimetype, registry); }
   RETURN_IF_ERROR(obj.status());
 
   if (std::any_cast<py::object>(&*obj) == nullptr) {
@@ -583,7 +578,7 @@ void BindSerializerRegistry(py::handle scope, std::string_view name) {
         }
         absl::StatusOr<Bytes> serialized;
         {
-          py::gil_scoped_release release_gil;
+          // py::gil_scoped_release release_gil;
           serialized = self->Serialize(value, mimetype_str);
           if (!serialized.ok()) {
             ASSIGN_OR_RETURN(std::any cpp_any,
@@ -601,10 +596,7 @@ void BindSerializerRegistry(py::handle scope, std::string_view name) {
       [](const std::shared_ptr<SerializerRegistry>& self, py::bytes data,
          std::string_view mimetype) -> absl::StatusOr<py::object> {
         absl::StatusOr<std::any> deserialized;
-        {
-          py::gil_scoped_release release_gil;
-          deserialized = self->Deserialize(std::move(data), mimetype);
-        }
+        { deserialized = self->Deserialize(std::move(data), mimetype); }
         RETURN_IF_ERROR(deserialized.status());
         if (std::any_cast<py::object>(&*deserialized) == nullptr) {
           return absl::InvalidArgumentError(
@@ -817,9 +809,9 @@ absl::Status EgltAssignInto(PySerializationArgs args, std::any* dest) {
 
     if (mimetype_str.empty()) {
       return absl::InvalidArgumentError(
-          "Mimetype must be specified or globally associated with "
-          "the "
-          "object type.");
+          absl::StrCat("Mimetype must be specified or globally associated with "
+                       "the object type ",
+                       std::string(py::repr(py::type::of(args.object))), "."));
     }
   }
 
@@ -845,8 +837,9 @@ absl::Status act::EgltAssignInto(const py::handle& obj, Chunk* chunk) {
 
   if (mimetype.empty()) {
     return absl::InvalidArgumentError(
-        "Mimetype must be specified or globally associated with the "
-        "object type.");
+        absl::StrCat("Mimetype must be specified or globally associated with "
+                     "the object type ",
+                     std::string(py::repr(py::type::of(obj))), "."));
   }
 
   absl::StatusOr<Chunk> serialized_chunk =
@@ -866,7 +859,6 @@ absl::Status act::EgltAssignInto(const py::handle& obj, Chunk* chunk) {
         "Failed to convert object: ", cpp_object.status().message()));
   }
 
-  py::gil_scoped_release release;  // Release GIL for serialization.
   serialized_chunk =
       ToChunk(*cpp_object, mimetype, &GetGlobalSerializerRegistry());
 

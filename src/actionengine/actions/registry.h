@@ -66,8 +66,8 @@ class ActionRegistry {
    * @param handler
    *   The handler function that will be called when the action is executed.
    */
-  void Register(std::string_view name, const ActionSchema& schema,
-                const ActionHandler& handler);
+  void Register(std::string_view name, ActionSchema schema,
+                ActionHandler handler);
 
   /** @brief
    *    Checks if an action with the given name is registered.
@@ -135,8 +135,8 @@ class ActionRegistry {
    * @return
    *   The ActionSchema of the action with the given name.
    */
-  absl::StatusOr<std::reference_wrapper<const ActionSchema>> GetSchema(
-      std::string_view name) const;
+  absl::StatusOr<std::reference_wrapper<ActionSchema>> GetSchema(
+      std::string_view name);
 
   /** @brief
    *    Gets the handler of the action with the given name.
@@ -146,8 +146,8 @@ class ActionRegistry {
    * @return
    *   The ActionHandler of the action with the given name.
    */
-  absl::StatusOr<std::reference_wrapper<const ActionHandler>> GetHandler(
-      std::string_view name) const;
+  absl::StatusOr<std::reference_wrapper<ActionHandler>> GetHandler(
+      std::string_view name);
 
   [[nodiscard]] std::vector<std::string> ListRegisteredActions() const;
 

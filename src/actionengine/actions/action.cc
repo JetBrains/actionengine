@@ -1002,7 +1002,7 @@ absl::StatusOr<std::unique_ptr<Action>> Action::MakeActionInSameSession(
   auto action =
       std::make_unique<Action>(action_id.empty() ? GenerateUUID4() : action_id);
 
-  const ActionRegistry* absl_nullable registry = bound_resources_.registry();
+  std::shared_ptr<ActionRegistry> registry = bound_resources_.borrow_registry();
   if (registry == nullptr) {
     return absl::FailedPreconditionError(absl::StrCat(
         "Cannot make action in same session: no registry is bound."));

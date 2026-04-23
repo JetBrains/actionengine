@@ -78,10 +78,10 @@ ActionRegistry::ActionRegistry() {
            });
 }
 
-void ActionRegistry::Register(std::string_view name, const ActionSchema& schema,
-                              const ActionHandler& handler) {
-  schemas_[name] = schema;
-  handlers_[name] = handler;
+void ActionRegistry::Register(std::string_view name, ActionSchema schema,
+                              ActionHandler handler) {
+  schemas_[name] = std::move(schema);
+  handlers_[name] = std::move(handler);
 }
 
 bool ActionRegistry::IsRegistered(std::string_view name) const {
@@ -105,20 +105,20 @@ absl::StatusOr<std::unique_ptr<Action>> ActionRegistry::MakeAction(
   action->set_handler(handler);
   action->set_schema(schema);
   action->mutable_bound_resources()->set_registry_non_owning(this);
+  action->mutable_bound_resources()->set_node_map(std::make_shared<NodeMap>());
 
   return action;
 }
 
-absl::StatusOr<std::reference_wrapper<const ActionSchema>>
-ActionRegistry::GetSchema(std::string_view name) const {
-  ASSIGN_OR_RETURN(const ActionSchema& schema, act::FindValue(schemas_, name));
+absl::StatusOr<std::reference_wrapper<ActionSchema>> ActionRegistry::GetSchema(
+    std::string_view name) {
+  ASSIGN_OR_RETURN(ActionSchema & schema, act::FindValue(schemas_, name));
   return schema;
 }
 
-absl::StatusOr<std::reference_wrapper<const ActionHandler>>
-ActionRegistry::GetHandler(std::string_view name) const {
-  ASSIGN_OR_RETURN(const ActionHandler& handler,
-                   act::FindValue(handlers_, name));
+absl::StatusOr<std::reference_wrapper<ActionHandler>>
+ActionRegistry::GetHandler(std::string_view name) {
+  ASSIGN_OR_RETURN(ActionHandler & handler, act::FindValue(handlers_, name));
   return handler;
 }
 

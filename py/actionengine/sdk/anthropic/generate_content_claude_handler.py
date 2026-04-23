@@ -18,23 +18,28 @@ import json
 import os
 
 import anthropic
+import actionengine.logging
 from actionengine.actions import Action
-from actionengine.logging import get_logger
 from actionengine.node_map import NodeMap
 from actionengine.sdk.anthropic.client import get_anthropic_client
 from actionengine.sdk.anthropic.generate_content_claude import (
     CreateMessageConfig,
 )
 from actionengine.sdk import interaction
-from actionengine.sdk.llm_tool_runner import TOOL_RUNNER_SCHEMA
+from actionengine.sdk import llm_tool
+from actionengine.sdk.llm_tool_runner import (
+    TOOL_RUNNER_SCHEMA,
+    set_allowed_tools,
+)
 from actionengine.sdk.rehydrate_interaction import REHYDRATE_INTERACTION_SCHEMA
 
-_LOGGER = get_logger().getChild("sdk.anthropic")
+_LOGGER = actionengine.logging.get_logger().getChild("generate_content_claude")
 
 
 async def generate_content_claude(
     action: Action,
 ):
+    _LOGGER.debug("started.")
     input_timeout = 60.0
 
     config: CreateMessageConfig = await action["config"].consume(
@@ -167,6 +172,7 @@ async def generate_content_claude(
                             "params": parsed_tool_input,
                         }
                     )
+                    _LOGGER.debug(f"tool call: {tool_calls[-1]}")
                     tool_names.pop(event.index)
                     tool_use_ids.pop(event.index)
                     tool_inputs.pop(event.index)
@@ -179,7 +185,8 @@ async def generate_content_claude(
                 TOOL_RUNNER_SCHEMA.name
             ):
                 raise RuntimeError(
-                    f"Tool runner not registered for action {action['id']}"
+                    f"Tool runner not registered for action "
+                    f"`{action.get_schema().name}` {action.get_id()}"
                 )
 
             assistant_message = {
@@ -202,15 +209,17 @@ async def generate_content_claude(
             messages.append(assistant_message)
 
             if tool_calls:
-                run_tools = (
-                    action.get_registry()
-                    .make_action(
-                        TOOL_RUNNER_SCHEMA.name,
-                        stream=None,
-                        node_map=NodeMap(),
-                    )
-                    .run()
+                run_tools = action.get_registry().make_action(
+                    TOOL_RUNNER_SCHEMA.name,
+                    stream=None,
+                    node_map=NodeMap(),
                 )
+                run_tools.set_header(llm_tool.LLM_HEADER, "claude")
+                run_tools.set_header(llm_tool.LLM_API_KEY_HEADER, api_key)
+                set_allowed_tools(
+                    run_tools, list(tool["name"] for tool in tools)
+                )
+                run_tools.run()
 
                 for tool_call in tool_calls:
                     log_line = f"tool call: \x1b[33;20m{tool_call['name']} {tool_call['id']}\x1b[0m"

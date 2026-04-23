@@ -30,6 +30,7 @@
 #include <absl/strings/str_join.h>
 
 #include "actionengine/data/types.h"
+#include "boost/json/object.hpp"
 
 namespace act {
 class Action;
@@ -48,18 +49,25 @@ class Action;
 
 namespace act {
 
+absl::StatusOr<boost::json::value> ParseJson(std::string_view serialized_json);
+
 using ActionHandler = std::function<absl::Status(std::shared_ptr<Action>)>;
 
-using NameAndMimetype = std::pair<std::string, std::string>;
-
-struct ActionSchemaPort {
+struct ActionPortSchema {
   std::string name;
   std::string type;
   std::string description;
   bool required = false;
+  bool unary = false;
 
-  // TBD for reliable preservation of Python typing
-  std::optional<std::string> extra_type_info;
+  boost::json::object json_schema;
+  std::optional<std::vector<Chunk>> autofills;
+};
+
+struct ActionHeaderSchema {
+  std::string name;
+  std::string description;
+  std::optional<std::string> default_value;
 };
 
 /** A schema for an action.
@@ -95,6 +103,14 @@ struct ActionSchema {
     return outputs.contains(output_name);
   }
 
+  void ClearJsonFieldMapping() { outputs.clear(); }
+
+  absl::Status MapOutputToJsonField(std::string_view output_name,
+                                    std::string_view json_field);
+
+  std::optional<std::string> GetJsonFieldForOutput(
+      std::string_view output_name) const;
+
   /** The action's name that is used to register it in the ActionRegistry. */
   std::string name;
 
@@ -104,7 +120,7 @@ struct ActionSchema {
    * message, and the mimetypes are used to specify the type of data that is
    * expected for each input.
    */
-  absl::flat_hash_map<std::string, ActionSchemaPort> inputs;
+  absl::flat_hash_map<std::string, ActionPortSchema> inputs;
 
   /** A mapping of output names to their mimetypes.
    *
@@ -112,10 +128,15 @@ struct ActionSchema {
    * message, and the mimetypes are used to specify the type of data that is
    * produced by the action for a given output.
    */
-  absl::flat_hash_map<std::string, ActionSchemaPort> outputs;
+  absl::flat_hash_map<std::string, ActionPortSchema> outputs;
 
   /** A description of the action. */
   std::string description;
+
+  absl::flat_hash_map<std::string, std::string> output_to_json_field;
+  absl::flat_hash_map<std::string, ActionHeaderSchema> headers;
+
+  std::shared_ptr<void> user_data;
 };
 
 constexpr std::string_view kListActionsDescription =
@@ -130,7 +151,7 @@ constexpr std::string_view kListActionsDescription =
 const ActionSchema kListActionsSchema = {
     .name = "__list_actions",
     .inputs = {},
-    .outputs = {{"actions", {"actions", "application/json"}}},
+    .outputs = {{"actions", ActionPortSchema{"actions", "application/json"}}},
     .description = std::string(kListActionsDescription),
 };
 
