@@ -15,9 +15,9 @@
 import asyncio
 import os
 
-import actionengine.logging
 from actionengine.actions import Action
 from actionengine.data import to_chunk
+from actionengine.logging import get_logger, get_prefixed_logger, TextColor
 from actionengine.sdk.anthropic.generate_content_claude import (
     GENERATE_CONTENT_CLAUDE_SCHEMA,
 )
@@ -31,11 +31,16 @@ from actionengine.sdk.ollama.generate_content_ollama import (
     GENERATE_CONTENT_OLLAMA_SCHEMA,
 )
 
-_LOGGER = actionengine.logging.get_logger().getChild("generate_content")
+_LOGGER = get_logger()
 
 
 async def generate_content(action: Action):
-    _LOGGER.info("started.")
+    logger = get_prefixed_logger(
+        _LOGGER,
+        TextColor.dimmed_blue("generate_content"),
+        first_time_prefix=TextColor.blue("generate_content"),
+    )
+    logger.info("started.")
 
     api_key = await action["api_key"].consume(timeout=3.0)
     if not api_key:
@@ -101,8 +106,11 @@ async def generate_content(action: Action):
     if handler is None:
         raise RuntimeError(f"Could not resolve handler for {provider}.")
 
-    _LOGGER.info(
-        "resolved provider: " + provider + " and handler: " + handler.__name__
+    logger.info(
+        "resolved provider: "
+        + provider
+        + " and handler: "
+        + TextColor.dimmed_yellow(handler.__name__)
     )
 
     generate = (

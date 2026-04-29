@@ -64,14 +64,19 @@ def get_tag():
     return f"{py_version}-{abi_tag}-{get_platform_tag()}"
 
 
-def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
-    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+def get_requires_for_build_wheel(config_settings=None):
+    return []
 
-    print(">>> Custom build_wheel(): building a pure wheel manually")
+
+def _run_build_process(is_editable=False):
+    """Common logic for compiling C++ extensions and generating stubs."""
+    print(
+        f">>> Running build process (editable={is_editable}, type={BUILD_TYPE})"
+    )
 
     path_env = os.environ.get("PATH")
     if path_env is None:
-        raise RuntimeError("PYTHONPATH is not set.")
+        raise RuntimeError("PATH is not set.")
 
     sep = ";" if sys.platform == "win32" else ":"
     path_dirs = path_env.split(sep)
@@ -110,8 +115,8 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             f"{CLANG_RESOURCES}"
         )
 
-    os.environ["CC"] = cc if cc is not None else f"clang{exe_suffix}"
-    os.environ["CXX"] = cxx if cxx is not None else f"clang++{exe_suffix}"
+    os.environ["CC"] = cc
+    os.environ["CXX"] = cxx
 
     if os.environ.get("ACTIONENGINE_KEEP_BUILD_DIR", None) is None:
         shutil.rmtree(REPO_ROOT / "build", ignore_errors=True)
@@ -127,10 +132,12 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
     os.chdir(REPO_ROOT)
     # Build the C++ extensions:
+    env = os.environ.copy()
+    env["CMAKE_BUILD_TYPE"] = BUILD_TYPE
     if (
         subprocess.Popen(
             [str(REPO_ROOT / "scripts" / "configure.sh")],
-            env=os.environ.update({"CMAKE_BUILD_TYPE": BUILD_TYPE}),
+            env=env,
         )
     ).wait() != 0:
         raise RuntimeError("Build failed during configure step.")
@@ -141,11 +148,19 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                 str(REPO_ROOT / "scripts" / "build_python.sh"),
                 "--only-rebuild-pybind11",
             ],
-            env=os.environ.update({"CMAKE_BUILD_TYPE": BUILD_TYPE}),
+            env=env,
         ).wait()
         != 0
     ):
         raise RuntimeError("Build failed during cmake build step.")
+
+
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+
+    print(">>> Custom build_wheel(): building a pure wheel manually")
+
+    _run_build_process(is_editable=False)
 
     dependencies = project.get("project", {}).get("dependencies", [])
     requires_dist = "\nRequires-Dist: ".join(dependencies)
@@ -163,16 +178,16 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
         pythonpath = os.environ.get("PYTHONPATH", "")
         pythonpaths = pythonpath.split(os.pathsep) if pythonpath else []
         pythonpaths = [pkg_target.parent] + pythonpaths
-        os.environ["PYTHONPATH"] = os.pathsep.join(
-            [str(p) for p in pythonpaths]
-        )
+        env = os.environ.copy()
+        env["PYTHONPATH"] = os.pathsep.join([str(p) for p in pythonpaths])
+
         if (
             subprocess.Popen(
                 [
                     str(REPO_ROOT / "scripts" / "generate_stubs.sh"),
                     str(pkg_target.parent),
                 ],
-                env=os.environ,
+                env=env,
             ).wait()
             != 0
         ):
@@ -251,5 +266,138 @@ Entry-Points: console_scripts
         return wheel_name
 
 
+def build_editable(
+    wheel_directory, config_settings=None, metadata_directory=None
+):
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+
+    print(">>> Custom build_editable(): building an editable wheel")
+
+    # Reuse the same compilation logic
+    _run_build_process(is_editable=True)
+
+    # Generate stubs in the source tree
+    if (
+        subprocess.Popen(
+            [
+                str(REPO_ROOT / "scripts" / "generate_stubs.sh"),
+                str(REPO_ROOT / "py"),
+            ],
+            env=os.environ,
+        ).wait()
+        != 0
+    ):
+        raise RuntimeError("Build failed during stub generation step.")
+
+    dependencies = project.get("project", {}).get("dependencies", [])
+    requires_dist = "\nRequires-Dist: ".join(dependencies)
+
+    version = project.get("project", {}).get("version")
+    if version is None:
+        raise RuntimeError("Version not found in pyproject.toml")
+
+    # Create a temporary directory for our editable wheel contents
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir = Path(temp_dir)
+
+        dist_info = (
+            temp_dir
+            / f"{NAME_WITH_HYPHEN.replace('-', '_')}-{version}.dist-info"
+        )
+        dist_info.mkdir()
+
+        # Create .pth file pointing to the 'py' directory
+        (temp_dir / f"{NAME}.pth").write_text(str(REPO_ROOT / "py"))
+
+        project_scripts = project.get("project", {}).get("scripts", {})
+        script_lines = []
+        for script_name, entry_point in project_scripts.items():
+            script_lines.append(f"{script_name}={entry_point}\n")
+
+        # Create entry_points.txt for console_scripts
+        (dist_info / "entry_points.txt").write_text(
+            "[console_scripts]\n" + "".join(script_lines)
+        )
+
+        # Generate METADATA
+        (dist_info / "METADATA").write_text(
+            f"Metadata-Version: 2.1\n"
+            f"Name: {NAME_WITH_HYPHEN}\n"
+            f"Version: {version}\n"
+            f"Requires-Dist: {requires_dist}\n"
+        )
+
+        # Generate WHEEL file
+        (dist_info / "WHEEL").write_text(
+            f"Wheel-Version: 1.0\n"
+            f"Generator: {NAME_WITH_HYPHEN}\n"
+            f"Root-Is-Purelib: false\n"
+            f"Tag: {get_tag()}\n"
+            f"Entry-Points: console_scripts\n"
+        )
+
+        # Write RECORD file
+        record_lines = []
+        for file_path in temp_dir.rglob("*"):
+            if not file_path.is_file():
+                continue
+            with open(file_path, "rb") as f:
+                data = f.read()
+
+            hash_digest = hashlib.sha256(data).digest()
+            hash_b64 = base64.urlsafe_b64encode(hash_digest).rstrip(b"=")
+            hash_str = f"sha256={hash_b64.decode('utf-8')}"
+            size = len(data)
+
+            rel = file_path.relative_to(temp_dir)
+            record_lines.append(f"{rel},{hash_str},{size}\n")
+        record_lines.append(f"{dist_info.relative_to(temp_dir) / 'RECORD'},,\n")
+
+        (dist_info / "RECORD").write_text("".join(record_lines))
+
+        # Build wheel filename
+        wheel_name = (
+            f"{NAME_WITH_HYPHEN.replace('-', '_')}-{version}-{get_tag()}.whl"
+        )
+        wheel_path = Path(wheel_directory) / wheel_name
+
+        # Zip it up
+        with zipfile.ZipFile(wheel_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_path in temp_dir.rglob("*"):
+                if file_path.is_file():
+                    zf.write(file_path, file_path.relative_to(temp_dir))
+
+        print(f"✅ Built editable wheel: {wheel_path}")
+        return wheel_name
+
+
 def build_sdist(sdist_directory, config_settings=None):
     raise RuntimeError("SDist build is not supported in this custom backend.")
+
+
+def get_requires_for_build_editable(config_settings=None):
+    return []
+
+
+def prepare_metadata_for_build_editable(
+    metadata_directory, config_settings=None
+):
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    version = project.get("project", {}).get("version")
+    dist_info = (
+        Path(metadata_directory)
+        / f"{NAME_WITH_HYPHEN.replace('-', '_')}-{version}.dist-info"
+    )
+    dist_info.mkdir(exist_ok=True)
+
+    dependencies = project.get("project", {}).get("dependencies", [])
+    requires_dist = "\nRequires-Dist: ".join(dependencies)
+
+    (dist_info / "METADATA").write_text(
+        f"Metadata-Version: 2.1\n"
+        f"Name: {NAME_WITH_HYPHEN}\n"
+        f"Version: {version}\n"
+        f"Requires-Dist: {requires_dist}\n"
+    )
+
+    return dist_info.name

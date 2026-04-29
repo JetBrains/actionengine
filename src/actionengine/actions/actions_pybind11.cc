@@ -576,6 +576,8 @@ void BindAction(py::handle scope, std::string_view name) {
                  auto action = std::make_shared<Action>(
                      !id.empty() ? id : GenerateUUID4());
                  action->set_schema(std::move(schema));
+                 action->mutable_bound_resources()->set_node_map(
+                     std::make_shared<NodeMap>());
                  return action;
                }),
                py::arg(), py::arg_v("id", ""));
@@ -805,7 +807,7 @@ void BindAction(py::handle scope, std::string_view name) {
       .def(
           "set_header",
           [](const std::shared_ptr<Action>& self, py::handle py_key,
-             py::handle py_value) -> absl::Status {
+             py::handle py_value) -> absl::StatusOr<std::shared_ptr<Action>> {
             std::string key, value;
             try {
               const auto py_key_str = py::cast<py::str>(py_key);
@@ -829,7 +831,7 @@ void BindAction(py::handle scope, std::string_view name) {
             value = std::string(py_value_bytes);
 
             self->set_header(key, value);
-            return absl::OkStatus();
+            return self;
           },
           py::arg("key"), py::arg("value"))
       .def(

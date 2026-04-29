@@ -180,6 +180,7 @@ class LLMTool:
 
     def get_schema(self) -> LLMToolSchema:
         schema = self._tool_schema.model_copy(deep=True)
+        schema.description = self._action_schema.description
         for input_name in self._action_schema.inputs():
             input_port = self._action_schema.input(input_name)
             # if autofills are set, the input should be excluded from the
@@ -300,9 +301,7 @@ class LLMTool:
                 await action.get_input(input_name).finalize()
             else:
                 if not isinstance(input_dict[input_name], (list, tuple)):
-                    raise ValueError(
-                        f"Input field {input_name} must be a list or tuple."
-                    )
+                    input_dict[input_name] = [input_dict[input_name]]
                 for chunk in input_dict[input_name]:
                     await action.get_input(input_name).put(chunk)
                 await action.get_input(input_name).finalize()
@@ -315,12 +314,27 @@ class LLMTool:
             else timeout - (time.perf_counter() - started_at)
         )
         await action.wait_until_complete(timeout_left)
+
+        at_least_one_output_mapped = False
         for output_name in self._action_schema.outputs():
             field_name = self._action_schema.get_json_field_for_output(
                 output_name
             )
+            if field_name is not None:
+                at_least_one_output_mapped = True
+                break
+
+        for output_name in self._action_schema.outputs():
+            field_name = self._action_schema.get_json_field_for_output(
+                output_name
+            )
+            # if no mapping is specified, outputs will be mapped to fields
+            # with the same name as the output.
             if field_name is None:
-                continue
+                if at_least_one_output_mapped:
+                    continue
+                else:
+                    field_name = output_name
 
             timeout_left = (
                 -1.0
@@ -339,7 +353,10 @@ class LLMTool:
                 output_name
             )
             if field_name is None:
-                continue
+                if at_least_one_output_mapped:
+                    continue
+                else:
+                    field_name = output_name
 
             if field_name == "$":
                 return self._reduce_chunked_output(

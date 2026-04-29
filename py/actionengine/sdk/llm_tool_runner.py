@@ -64,6 +64,13 @@ def make_tools(
     :param names: A list of tool names.
     :return: A dictionary of LLMTools."""
 
+    names = list(names)
+    if (
+        registry.is_registered("submit_response__")
+        and "submit_response__" not in names
+    ):
+        names.append("submit_response__")
+
     for tool_name in names:
         if not registry.is_registered(tool_name):
             raise ValueError(
@@ -214,6 +221,7 @@ def make_llm_tool_runner():
         headers[llm_tool.LLM_HEADER] = llm
         headers[llm_tool.LLM_API_KEY_HEADER] = api_key
         allowed_tools = get_allowed_tools(action)
+        allowed_tools += ["submit_response__"]
         headers[llm_tool.ALLOWED_TOOLS_HEADER] = ",".join(allowed_tools)
 
         tools = make_tools(action.get_registry(), allowed_tools)
@@ -240,8 +248,6 @@ def make_llm_tool_runner():
                         )
                     )
                 )
-                # if tool_call_idx == 0:
-                #     await asyncio.sleep(0.05)
                 tool_call_idx += 1
 
             await asyncio.gather(*tasks)
@@ -259,5 +265,3 @@ def enable_llm_tool_runner(
         TOOL_RUNNER_SCHEMA,
         make_llm_tool_runner(),
     )
-    print("enable_llm_tool_runner: ")
-    print(registry.list_registered_actions())

@@ -98,9 +98,9 @@ class ActionSchema(_C.actions.ActionSchema):
         for input_tuple in inputs:
             if len(input_tuple) == 2:
                 input_name, input_type = input_tuple
-                description = ""
+                input_desc = ""
             else:
-                input_name, input_type, description = input_tuple
+                input_name, input_type, input_desc = input_tuple
             if isinstance(input_type, type):
                 self.set_python_type_for_port(input_name, input_type)
             if isinstance(input_type, type) and issubclass(
@@ -108,15 +108,15 @@ class ActionSchema(_C.actions.ActionSchema):
             ):
                 input_type = "__BaseModel__"
             input_ports.append(
-                ActionPortSchema(input_name, input_type, description)
+                ActionPortSchema(input_name, input_type, input_desc)
             )
 
         for output_tuple in outputs:
             if len(output_tuple) == 2:
                 output_name, output_type = output_tuple
-                description = ""
+                output_desc = ""
             else:
-                output_name, output_type, description = output_tuple
+                output_name, output_type, output_desc = output_tuple
 
             if isinstance(output_type, type):
                 self.set_python_type_for_port(output_name, output_type)
@@ -125,7 +125,7 @@ class ActionSchema(_C.actions.ActionSchema):
             ):
                 output_type = "__BaseModel__"
             output_ports.append(
-                ActionPortSchema(output_name, output_type, description)
+                ActionPortSchema(output_name, output_type, output_desc)
             )
 
         super().__init__(
