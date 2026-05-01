@@ -30,6 +30,9 @@ from actionengine.sdk.llm.generate_content import (
 from actionengine.sdk.ollama.generate_content_ollama import (
     GENERATE_CONTENT_OLLAMA_SCHEMA,
 )
+from actionengine.sdk.openai.generate_content_openai import (
+    GENERATE_CONTENT_OPENAI_SCHEMA,
+)
 
 _LOGGER = get_logger()
 
@@ -59,6 +62,10 @@ async def generate_content(action: Action):
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         provider = "claude"
 
+    if api_key == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY")
+        provider = "openai"
+
     if api_key is None:
         raise ValueError(f"API key is required.")
 
@@ -78,6 +85,8 @@ async def generate_content(action: Action):
             schema = GENERATE_CONTENT_CLAUDE_SCHEMA
         case "ollama":
             schema = GENERATE_CONTENT_OLLAMA_SCHEMA
+        case "openai":
+            schema = GENERATE_CONTENT_OPENAI_SCHEMA
 
     handler = None
     match provider:
@@ -102,6 +111,15 @@ async def generate_content(action: Action):
             )
 
             handler = generate_content_ollama
+        case "openai":
+            from actionengine.sdk.openai.generate_content_openai_handler import (
+                generate_content_openai,
+                CreateResponseConfig,
+            )
+
+            to_chunk(CreateResponseConfig())
+
+            handler = generate_content_openai
 
     if handler is None:
         raise RuntimeError(f"Could not resolve handler for {provider}.")
