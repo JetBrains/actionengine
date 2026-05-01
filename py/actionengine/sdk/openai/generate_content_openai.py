@@ -12,37 +12,37 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Literal
+
 from actionengine.actions import ActionSchema
-
-_ENABLED_PROVIDERS = {"claude", "gemini", "ollama", "openai"}
-
-
-def set_enabled_providers(providers: set[str]) -> None:
-    """Set the enabled providers for the generate_content action.
-
-    Args:
-        providers (set[str]): Set of provider names to enable.
-    """
-    global _ENABLED_PROVIDERS
-    _ENABLED_PROVIDERS = providers
+from pydantic import BaseModel, Field
 
 
-def is_provider_enabled(provider: str) -> bool:
-    return provider in _ENABLED_PROVIDERS
+class CreateResponseConfig(BaseModel):
+    max_output_tokens: int = Field(
+        default=32768,
+        description="Maximum number of output tokens to generate.",
+    )
+    model: str = Field(
+        default="gpt-5.5",
+        description="OpenAI model to use for generation.",
+    )
+    reasoning_effort: (
+        Literal["none", "low", "medium", "high", "xhigh"] | None
+    ) = Field(
+        default="none",
+        description="Reasoning effort for models that support reasoning.",
+    )
 
 
-def get_enabled_providers() -> set[str]:
-    return _ENABLED_PROVIDERS.copy()
-
-
-GENERATE_CONTENT_SCHEMA = ActionSchema(
-    name="generate_content",
+GENERATE_CONTENT_OPENAI_SCHEMA = ActionSchema(
+    name="generate_content_openai",
     inputs=[
         ("api_key", "text/plain"),
         ("chat_input", "text/plain"),
         ("system_instructions", "text/plain"),
         ("interaction_token", "text/plain"),
-        ("config", "__BaseModel__"),
+        ("config", CreateResponseConfig),
         ("tools", "application/json"),
     ],
     outputs=[
