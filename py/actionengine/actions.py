@@ -235,15 +235,12 @@ class Action(_C.actions.Action):
         if not hasattr(self, "_schema"):
             self._schema = self.get_schema()
 
-    async def wait_until_complete(
-        self,
-        timeout: float = -1.0,
-        future: asyncio.Future[None] = None,
-    ):
+    async def wait_until_complete(self, timeout: float = -1.0):
         """Waits for the action to complete with an optional timeout."""
-        future = future or asyncio.get_running_loop().create_future()
-        _C.actions.Action.wait_until_complete(self, timeout, future)
-        await future
+        future = _C.actions.Action.get_future(self)
+        if future is None:
+            raise RuntimeError("Action Future is not set.")
+        await asyncio.wait_for(future, timeout if timeout >= 0 else None)
 
     async def call(
         self, wire_message_headers: dict[str, bytes] | None = None

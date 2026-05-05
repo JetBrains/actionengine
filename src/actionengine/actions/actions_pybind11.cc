@@ -54,20 +54,22 @@ struct PyUserData {
 
     // no deletion unless fully run or cancelled
     if (action->HasBeenRun()) {
-      DCHECK(future.attr("done")().cast<bool>());
+      DCHECK(concurrent_future.attr("done")().cast<bool>());
     }
 
-    future = py::object();
+    asyncio_future = py::object();
+    concurrent_future = py::object();
   }
 
   Action* absl_nonnull action = nullptr;
   thread::PermanentEvent done;
-  py::object future;
+
+  py::object concurrent_future;
+  py::object asyncio_future;
 };
 
 static std::shared_ptr<PyUserData> EnsurePyUserData(
     Action* absl_nonnull action) {
-  py::gil_scoped_acquire gil;
   if (absl::StatusOr<std::shared_ptr<void>> future_ptr =
           action->GetUserData("_py_user_data");
       future_ptr.ok()) {
@@ -75,7 +77,9 @@ static std::shared_ptr<PyUserData> EnsurePyUserData(
   }
   auto user_data = std::make_shared<PyUserData>();
   user_data->action = action;
-  user_data->future = GetGloballySavedEventLoop().attr("create_future")();
+  user_data->concurrent_future = py::none();
+  user_data->asyncio_future =
+      GetGloballySavedEventLoop().attr("create_future")();
   action->SetUserData("_py_user_data", user_data);
   return user_data;
 }
@@ -96,77 +100,77 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
   }
 
   return [py_handler](const std::shared_ptr<Action>& action) -> absl::Status {
+    py::gil_scoped_acquire gil;
     std::shared_ptr<PyUserData> user_data = EnsurePyUserData(action.get());
 
-    absl::Status status;
-    py::object future;
-
-    {
-      py::gil_scoped_acquire gil;
-      absl::StatusOr<py::object> future_or = RunThreadsafeIfCoroutine(
-          py_handler(action), GetGloballySavedEventLoop(),
-          /*return_future=*/true);
-      if (!future_or.ok()) {
-        status = future_or.status();
-      } else {
-        future = std::move(*future_or);
-      }
-      user_data->future = future;
+    absl::StatusOr<py::object> concurrent_future_or = RunThreadsafeIfCoroutine(
+        py_handler(action), GetGloballySavedEventLoop(),
+        /*return_future=*/true);
+    if (!concurrent_future_or.ok()) {
+      return concurrent_future_or.status();
     }
 
-    if (!status.ok()) {
-      return status;
-    }
+    user_data->concurrent_future = *std::move(concurrent_future_or);
+    *concurrent_future_or = py::object();
 
     // If an action is cancelled from C++ side,
     action->SetOnCancelled([user_data]() {
       py::gil_scoped_acquire gil;
-      auto _ = user_data->future.attr("cancel")();
+      auto _ = user_data->concurrent_future.attr("cancel")();
     });
 
-    {
-      py::gil_scoped_acquire gil;
-      // future.attr("add_done_callback")(
-      //     py::cpp_function([action](py::handle future) {
-      //       py::gil_scoped_acquire gil;
-      //
-      //       if (const bool cancelled = future.attr("cancelled")().cast<bool>();
-      //           !cancelled) {
-      //         return;
-      //       }
-      //
-      //       if (action->HasBeenCancelled()) {
-      //         return;
-      //       }
-      //       {
-      //         py::gil_scoped_release release;
-      //         action->Cancel().IgnoreError();
-      //       }
-      //     }));
+    user_data->concurrent_future.attr("add_done_callback")(
+        py::handle(py::cpp_function([user_data](py::handle) {
+          py::gil_scoped_acquire gil;
+          if (!user_data->done.HasBeenNotified()) {
+            user_data->done.Notify();
+          }
+        })));
 
-      future.attr("add_done_callback")(
-          py::handle(py::cpp_function([user_data](py::handle) {
-            py::gil_scoped_acquire gil;
-            if (!user_data->done.HasBeenNotified()) {
-              user_data->done.Notify();
+    user_data->asyncio_future.attr("add_done_callback")(
+        py::handle(py::cpp_function([user_data](py::handle future) {
+          py::gil_scoped_acquire gil;
+          if (future.attr("cancelled")().cast<bool>()) {
+            if (!user_data->concurrent_future.attr("done")().cast<bool>()) {
+              auto _ = user_data->concurrent_future.attr("cancel")();
             }
-          })));
-    }
-
-    thread::Select({user_data->done.OnEvent()});
+          }
+        })));
 
     {
-      py::gil_scoped_acquire gil;
-      try {
-        auto _ = future.attr("result")();
-        status = absl::OkStatus();
-      } catch (py::error_already_set& e) {
-        status = absl::InternalError(absl::StrCat(e.what()));
-      }
-      future = py::object();
+      py::gil_scoped_release release_gil;
+      thread::Select({user_data->done.OnEvent()});
     }
 
-    return status;
+    py::object result = py::none();
+    bool error = false;
+    std::string exc_text;
+    try {
+      result = user_data->concurrent_future.attr("result")();
+    } catch (py::error_already_set& e) {
+      error = true;
+      exc_text = e.what();
+    }
+
+    user_data->asyncio_future.attr("get_loop")().attr("call_soon_threadsafe")(
+        py::cpp_function([result = std::move(result),
+                          exc_text = std::move(exc_text), user_data, error] {
+          if (user_data->asyncio_future.attr("done")().cast<bool>()) {
+            return;
+          }
+          if (!error) {
+            user_data->asyncio_future.attr("set_result")(std::move(result));
+          } else {
+            user_data->asyncio_future.attr("set_exception")(
+                PyObject_CallFunction(PyExc_RuntimeError, "s",
+                                      exc_text.c_str()));
+          }
+        }));
+
+    if (error) {
+      return absl::InternalError(absl::StrCat(exc_text));
+    }
+    return absl::OkStatus();
   };
 }
 
@@ -654,103 +658,12 @@ void BindAction(py::handle scope, std::string_view name) {
             return *dispatch_status_or;
           },
           py::arg("headers") = py::none())
-      .def(
-          "wait_until_complete",
-          [](std::shared_ptr<Action> action, double timeout = -1.0,
-             py::handle future = py::none()) {
-            const absl::Duration timeout_duration =
-                timeout < 0 ? absl::InfiniteDuration() : absl::Seconds(timeout);
-            bool timeout_occurred = false;
-
-            // if no future is given, wait inline
-            if (future.is_none()) {
-              py::gil_scoped_release release_gil;
-              if (absl::Status status =
-                      action->Await(timeout_duration, &timeout_occurred);
-                  timeout_occurred) {
-                return absl::DeadlineExceededError("Timeout occurred.");
-              } else {
-                return status;
-              }
-            }
-
-            // before making a fiber, try to get the result without waiting
-            absl::Status zero_timeout_status;
-            {
-              py::gil_scoped_release release_gil;
-              zero_timeout_status =
-                  action->Await(absl::ZeroDuration(), &timeout_occurred);
-            }
-            if (ABSL_PREDICT_FALSE(!timeout_occurred)) {
-              if (zero_timeout_status.ok()) {
-                future.attr("set_result")(py::none());
-              } else {
-                future.attr("set_exception")(PyObject_CallFunction(
-                    PyExc_RuntimeError, "s", zero_timeout_status.message()));
-              }
-
-              return absl::OkStatus();
-            }
-
-            thread::Detach({}, [future, timeout_duration, action]() mutable {
-              py::gil_scoped_acquire gil;
-              py::object future_obj = py::cast<py::object>(future);
-              auto done = std::make_shared<thread::PermanentEvent>();
-
-              future.attr("add_done_callback")(
-                  py::cpp_function([current_fiber = thread::Fiber::Current(),
-                                    done, action](py::handle future) {
-                    py::gil_scoped_acquire gil;
-                    if (!future.attr("cancelled")().cast<bool>()) {
-                      return;
-                    }
-                    if (!done->HasBeenNotified()) {
-                      current_fiber->Cancel();
-                      action->Cancel().IgnoreError();
-                    }
-                  }));
-
-              bool timeout_occurred = false;
-              absl::Status status;
-              {
-                py::gil_scoped_release release_gil;
-                status = action->Await(timeout_duration, &timeout_occurred);
-              }
-
-              if (timeout_occurred) {
-                if (!future.attr("done")().cast<bool>()) {
-                  future.attr("get_loop")().attr("call_soon_threadsafe")(
-                      future.attr("set_exception"),
-                      PyObject_CallFunction(PyExc_RuntimeError, "s",
-                                            "Timeout occurred."));
-                }
-                future_obj = py::object();
-                return;
-              }
-
-              if (!status.ok()) {
-                if (!future.attr("done")().cast<bool>()) {
-                  future.attr("get_loop")().attr("call_soon_threadsafe")(
-                      future.attr("set_exception"),
-                      PyObject_CallFunction(PyExc_RuntimeError, "s",
-                                            status.message()));
-                }
-                future_obj = py::object();
-                return;
-              }
-
-              future.attr("get_loop")().attr("call_soon_threadsafe")(
-                  future.attr("set_result"), py::none());
-              future_obj = py::object();
-
-              action.reset();
-            });
-
-            return absl::OkStatus();
-          }
-
-          ,
-          py::arg_v("timeout", -1.0), py::arg_v("future", py::none()))
+      .def("get_future",
+           [](const std::shared_ptr<Action>& action) {
+             const std::shared_ptr<PyUserData> user_data =
+                 EnsurePyUserData(action.get());
+             return user_data->asyncio_future;
+           })
       .def(
           "clear_inputs_after_run",
           [](const std::shared_ptr<Action>& self, bool clear) {
@@ -763,14 +676,13 @@ void BindAction(py::handle scope, std::string_view name) {
             self->mutable_settings()->clear_outputs_after_run = clear;
           },
           py::arg_v("clear", true))
-      .def(
-          "cancel",
-          [](const std::shared_ptr<Action>& self) {
-            const auto user_data = EnsurePyUserData(self.get());
-            auto _ = user_data->future.attr("cancel")();
-            return self->Cancel();
-          },
-          py::call_guard<py::gil_scoped_release>())
+      .def("cancel",
+           [](const std::shared_ptr<Action>& self) {
+             const auto user_data = EnsurePyUserData(self.get());
+             auto _ = user_data->asyncio_future.attr("cancel")();
+             py::gil_scoped_release release_gil;
+             return self->Cancel();
+           })
       .def("cancelled", &Action::HasBeenCancelled,
            py::call_guard<py::gil_scoped_release>())
       .def(
