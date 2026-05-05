@@ -57,13 +57,12 @@ struct PyUserData {
       DCHECK(future.attr("done")().cast<bool>());
     }
 
-    py::object empty1;
-    std::swap(future, empty1);
+    future = py::object();
   }
 
   Action* absl_nonnull action = nullptr;
   thread::PermanentEvent done;
-  py::object future = py::none();
+  py::object future;
 };
 
 static std::shared_ptr<PyUserData> EnsurePyUserData(
@@ -657,15 +656,101 @@ void BindAction(py::handle scope, std::string_view name) {
           py::arg("headers") = py::none())
       .def(
           "wait_until_complete",
-          [](const std::shared_ptr<Action>& action, double timeout = -1.0) {
-            absl::Duration timeout_duration = absl::InfiniteDuration();
-            if (timeout >= 0.0) {
-              timeout_duration = absl::Seconds(timeout);
-            }
+          [](std::shared_ptr<Action> action, double timeout = -1.0,
+             py::handle future = py::none()) {
+            const absl::Duration timeout_duration =
+                timeout < 0 ? absl::InfiniteDuration() : absl::Seconds(timeout);
             bool timeout_occurred = false;
-            return action->Await(timeout_duration, &timeout_occurred);
-          },
-          py::call_guard<py::gil_scoped_release>(), py::arg_v("timeout", -1.0))
+
+            // if no future is given, wait inline
+            if (future.is_none()) {
+              py::gil_scoped_release release_gil;
+              if (absl::Status status =
+                      action->Await(timeout_duration, &timeout_occurred);
+                  timeout_occurred) {
+                return absl::DeadlineExceededError("Timeout occurred.");
+              } else {
+                return status;
+              }
+            }
+
+            // before making a fiber, try to get the result without waiting
+            absl::Status zero_timeout_status;
+            {
+              py::gil_scoped_release release_gil;
+              zero_timeout_status =
+                  action->Await(absl::ZeroDuration(), &timeout_occurred);
+            }
+            if (ABSL_PREDICT_FALSE(!timeout_occurred)) {
+              if (zero_timeout_status.ok()) {
+                future.attr("set_result")(py::none());
+              } else {
+                future.attr("set_exception")(PyObject_CallFunction(
+                    PyExc_RuntimeError, "s", zero_timeout_status.message()));
+              }
+
+              return absl::OkStatus();
+            }
+
+            thread::Detach({}, [future, timeout_duration, action]() mutable {
+              py::gil_scoped_acquire gil;
+              py::object future_obj = py::cast<py::object>(future);
+              auto done = std::make_shared<thread::PermanentEvent>();
+
+              future.attr("add_done_callback")(
+                  py::cpp_function([current_fiber = thread::Fiber::Current(),
+                                    done, action](py::handle future) {
+                    py::gil_scoped_acquire gil;
+                    if (!future.attr("cancelled")().cast<bool>()) {
+                      return;
+                    }
+                    if (!done->HasBeenNotified()) {
+                      current_fiber->Cancel();
+                      action->Cancel().IgnoreError();
+                    }
+                  }));
+
+              bool timeout_occurred = false;
+              absl::Status status;
+              {
+                py::gil_scoped_release release_gil;
+                status = action->Await(timeout_duration, &timeout_occurred);
+              }
+
+              if (timeout_occurred) {
+                if (!future.attr("done")().cast<bool>()) {
+                  future.attr("get_loop")().attr("call_soon_threadsafe")(
+                      future.attr("set_exception"),
+                      PyObject_CallFunction(PyExc_RuntimeError, "s",
+                                            "Timeout occurred."));
+                }
+                future_obj = py::object();
+                return;
+              }
+
+              if (!status.ok()) {
+                if (!future.attr("done")().cast<bool>()) {
+                  future.attr("get_loop")().attr("call_soon_threadsafe")(
+                      future.attr("set_exception"),
+                      PyObject_CallFunction(PyExc_RuntimeError, "s",
+                                            status.message()));
+                }
+                future_obj = py::object();
+                return;
+              }
+
+              future.attr("get_loop")().attr("call_soon_threadsafe")(
+                  future.attr("set_result"), py::none());
+              future_obj = py::object();
+
+              action.reset();
+            });
+
+            return absl::OkStatus();
+          }
+
+          ,
+          py::arg_v("timeout", -1.0), py::arg_v("future", py::none()))
       .def(
           "clear_inputs_after_run",
           [](const std::shared_ptr<Action>& self, bool clear) {

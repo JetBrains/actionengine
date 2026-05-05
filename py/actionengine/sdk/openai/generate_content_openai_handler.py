@@ -97,7 +97,7 @@ async def _run_tool_calls(
         stream=None,
         node_map=NodeMap(),
     )
-    run_tools.set_header(llm_tool.LLM_HEADER, "openai")
+    run_tools.set_header(llm_tool.LLM_PROVIDER_HEADER, "openai")
     run_tools.set_header(llm_tool.LLM_API_KEY_HEADER, api_key)
     set_allowed_tools(run_tools, list(tool["name"] for tool in tools))
     run_tools.run()
@@ -214,7 +214,7 @@ async def generate_content_openai(action: Action):
                 create_kwargs["tool_choice"] = "auto"
             if config.reasoning_effort is not None:
                 create_kwargs["reasoning"] = {
-                    "effort": config.reasoning_effort
+                    "effort": config.reasoning_effort,
                 }
 
             stream = await client.responses.create(**create_kwargs)

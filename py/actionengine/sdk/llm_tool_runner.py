@@ -93,7 +93,7 @@ def get_llm_and_api_key(action: actions.Action):
     :return: A tuple of (LLM, API key).
     """
 
-    llm = action.get_header(llm_tool.LLM_HEADER, decode=True)
+    llm = action.get_header(llm_tool.LLM_PROVIDER_HEADER, decode=True)
     api_key = action.get_header(llm_tool.LLM_API_KEY_HEADER, decode=True)
 
     if not llm:
@@ -137,7 +137,7 @@ def forward_tool_headers(
         src,
         dst,
         headers=(
-            llm_tool.LLM_HEADER,
+            llm_tool.LLM_PROVIDER_HEADER,
             llm_tool.LLM_API_KEY_HEADER,
             llm_tool.ALLOWED_TOOLS_HEADER,
         ),
@@ -218,7 +218,7 @@ def make_llm_tool_runner():
         headers = dict()
 
         llm, api_key = get_llm_and_api_key(action)
-        headers[llm_tool.LLM_HEADER] = llm
+        headers[llm_tool.LLM_PROVIDER_HEADER] = llm
         headers[llm_tool.LLM_API_KEY_HEADER] = api_key
         allowed_tools = get_allowed_tools(action)
         allowed_tools += ["submit_response__"]
@@ -227,17 +227,17 @@ def make_llm_tool_runner():
         tools = make_tools(action.get_registry(), allowed_tools)
 
         try:
-            tasks = []
+            async with asyncio.TaskGroup() as tg:
+                # start all tools as soon as possible, but preserve call order
+                tool_call_idx = 0
+                while True:
+                    chunk: data.Chunk | None = await action[
+                        "calls"
+                    ].next_chunk()
+                    if chunk is None:
+                        break
 
-            # start all tools as soon as possible, but preserve call order
-            tool_call_idx = 0
-            while True:
-                chunk: data.Chunk | None = await action["calls"].next_chunk()
-                if chunk is None:
-                    break
-
-                tasks.append(
-                    asyncio.create_task(
+                    tg.create_task(
                         _run_tool(
                             tools,
                             action.get_registry(),
@@ -247,10 +247,7 @@ def make_llm_tool_runner():
                             headers=headers,
                         )
                     )
-                )
-                tool_call_idx += 1
-
-            await asyncio.gather(*tasks)
+                    tool_call_idx += 1
         finally:
             await action["outputs"].finalize()
 

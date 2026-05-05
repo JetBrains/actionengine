@@ -27,7 +27,9 @@ from actionengine.actions import (
 from actionengine.async_node import AsyncNode
 
 ALLOWED_TOOLS_HEADER = "x-ae-allowed-tools"
-LLM_HEADER = "x-ae-llm"
+LLM_PROVIDER_HEADER = "x-ae-llm-provider"
+LLM_MODEL_HEADER = "x-ae-llm-model"
+LLM_EXTRA_CONFIG_HEADER = "x-ae-llm-extra-config"
 LLM_API_KEY_HEADER = "x-ae-llm-api-key"
 
 _LOGGER = actionengine.logging.get_logger()

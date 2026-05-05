@@ -495,8 +495,13 @@ absl::Status ActionExecutionContext::AwaitRun_(
   }
 
   DCHECK(run_state.fiber != nullptr);
+  if (run_state.run_result) {
+    *status_out = *run_state.run_result;
+    return absl::OkStatus();
+  }
+  thread::Case on_joinable = run_state.fiber->OnJoinable();
   mu_.unlock();
-  thread::SelectUntil(deadline, {run_state.fiber->OnJoinable()});
+  thread::SelectUntil(deadline, {on_joinable});
   mu_.lock();
 
   // check status before checking expiration to return results optimistically
@@ -504,8 +509,7 @@ absl::Status ActionExecutionContext::AwaitRun_(
   if (run_state.run_result) {
     mu_.unlock();
     const bool fiber_completed =
-        thread::SelectUntil(absl::InfinitePast(),
-                            {run_state.fiber->OnJoinable()}) == 0;
+        thread::SelectUntil(absl::InfinitePast(), {on_joinable}) == 0;
     mu_.lock();
     DCHECK(fiber_completed)
         << "Failed invariant check: if run status is set, action fiber MUST "
@@ -931,7 +935,7 @@ absl::Status Action::Await(absl::Duration timeout,
   if (absl::Status await_status =
           ctx_.Await(&exec_status, absl::Now() + timeout);
       !await_status.ok()) {
-    if (timeout_exceeded != nullptr) {
+    if (timeout_exceeded != nullptr && absl::IsDeadlineExceeded(await_status)) {
       *timeout_exceeded = true;
     }
     return await_status;

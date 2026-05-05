@@ -131,7 +131,15 @@ class AsyncNode(_C.nodes.AsyncNode):
 
     async def next_object(self, timeout: float = -1.0) -> Any:
         """Returns the next object in the store, or None if the store is empty."""
-        return await asyncio.to_thread(self.next_object_sync, timeout)
+        chunk = await self.next_chunk(timeout)
+        if chunk is None:
+            return None
+        return await asyncio.to_thread(
+            data.from_chunk,
+            chunk,
+            mimetype=chunk.metadata.mimetype,
+            registry=self._serializer_registry,
+        )
 
     def next_object_sync(self, timeout: float = -1.0) -> Any:
         """Returns the next object in the store, or None if the store is empty."""

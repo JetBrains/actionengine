@@ -147,8 +147,7 @@ void BindAsyncNode(py::handle scope, std::string_view name) {
             absl::StatusOr<std::optional<NodeFragment>> zero_timeout_result =
                 self->Next<NodeFragment>(absl::ZeroDuration());
             if (ABSL_PREDICT_TRUE(zero_timeout_result.ok())) {
-              future.attr("get_loop")().attr("call_soon_threadsafe")(
-                  future.attr("set_result"), *std::move(zero_timeout_result));
+              future.attr("set_result")(*std::move(zero_timeout_result));
               return std::nullopt;
             }
 
@@ -224,8 +223,7 @@ void BindAsyncNode(py::handle scope, std::string_view name) {
             absl::StatusOr<std::optional<Chunk>> zero_timeout_result =
                 self->Next<Chunk>(absl::ZeroDuration());
             if (ABSL_PREDICT_TRUE(zero_timeout_result.ok())) {
-              future.attr("get_loop")().attr("call_soon_threadsafe")(
-                  future.attr("set_result"), *std::move(zero_timeout_result));
+              future.attr("set_result")(*std::move(zero_timeout_result));
               return std::nullopt;
             }
 

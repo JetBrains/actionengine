@@ -223,7 +223,7 @@ async def generate_content_claude(
                     stream=None,
                     node_map=NodeMap(),
                 )
-                run_tools.set_header(llm_tool.LLM_HEADER, "claude")
+                run_tools.set_header(llm_tool.LLM_PROVIDER_HEADER, "claude")
                 run_tools.set_header(llm_tool.LLM_API_KEY_HEADER, api_key)
                 set_allowed_tools(
                     run_tools, list(tool["name"] for tool in tools)
