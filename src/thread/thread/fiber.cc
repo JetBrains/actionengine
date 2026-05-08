@@ -73,6 +73,7 @@ void Fiber::Start() {
   EnsureWorkerThreadPool();
 
   EnsureThreadHasScheduler<boost::fibers::algo::round_robin>();
+  // EnsureThreadHasScheduler<boost::fibers::algo::shared_work>(/*suspend=*/true);
 
   auto body = [this]() {
     std::move(work_)();
@@ -91,10 +92,10 @@ void Fiber::Start() {
   // is made here.
   act::concurrency::impl::MutexLock lock(&mu_);
   properties_ = new FiberProperties(this);
-  auto context = boost::fibers::make_worker_context_with_properties(
+  context_ = boost::fibers::make_worker_context_with_properties(
       boost::fibers::launch::post, properties_,
       WorkerThreadPool::Instance().Allocator(), std::move(body));
-  WorkerThreadPool::Instance().Schedule(context.get());
+  WorkerThreadPool::Instance().Schedule(context_);
 }
 
 Fiber::~Fiber() {

@@ -139,6 +139,8 @@ class Fiber {
 
   enum State : uint8_t { RUNNING, FINISHED, JOINED };
 
+  boost::intrusive_ptr<boost::fibers::context> context_ = nullptr;
+
   State state_ ABSL_GUARDED_BY(mu_) = RUNNING;
 
   Fiber* absl_nullable const parent_;

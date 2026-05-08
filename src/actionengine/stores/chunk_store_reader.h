@@ -85,6 +85,8 @@ struct ChunkStoreReaderOptions {
  */
 class ChunkStoreReader {
  public:
+  using NodeFragmentFuture = act::Future<std::optional<NodeFragment>>;
+
   /** @brief
    *    Constructs a ChunkStoreReader for the given ChunkStore, setting
    *    @p options if provided.
@@ -172,6 +174,8 @@ class ChunkStoreReader {
   absl::StatusOr<std::optional<NodeFragment>> NextFragment(
       std::optional<absl::Duration> timeout = std::nullopt);
 
+  absl::StatusOr<NodeFragmentFuture> NextNodeFragmentFuture();
+
   /** @brief
    *    Same as Next(), but casts the chunk to the specified type `T`.
    *
@@ -235,6 +239,8 @@ class ChunkStoreReader {
 
   absl::Status RunPrefetchLoop() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
+  absl::Status FanoutBufferToWaiters() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
   ChunkStore* const absl_nonnull chunk_store_;
   ChunkStoreReaderOptions options_;
 
@@ -244,6 +250,10 @@ class ChunkStoreReader {
   int total_chunks_read_ = 0;
 
   size_t pending_ops_ ABSL_GUARDED_BY(mu_) = 0;
+
+  std::deque<std::shared_ptr<NodeFragmentFuture::State>> waiters_
+      ABSL_GUARDED_BY(mu_);
+  bool loop_started_and_running_ ABSL_GUARDED_BY(mu_) = false;
 
   absl::Status status_;
   act::CondVar cv_ ABSL_GUARDED_BY(mu_);

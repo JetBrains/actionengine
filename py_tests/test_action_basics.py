@@ -57,9 +57,45 @@ async def test_action_runs():
     print("Echo complete outside", flush=True)
 
 
-async def main():
-    await test_action_runs()
+@pytest.mark.asyncio
+async def test_chunk_iteration():
+    actionengine._C.save_event_loop_globally(asyncio.get_running_loop())
+    for _ in range(1000):
+        node = actionengine.AsyncNode("test")
+
+        async def produce():
+            for word in ("Hello, ", "world!"):
+                await node.put(word)
+            await node.finalize()
+
+        async def consume():
+            assert await node.next() == "Hello, "
+            assert await node.next() == "world!"
+            assert await node.next() is None
+
+        await asyncio.gather(
+            produce(),
+            consume(),
+        )
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+@pytest.mark.asyncio
+async def test_node_fragment_iteration():
+    actionengine._C.save_event_loop_globally(asyncio.get_running_loop())
+    for _ in range(1000):
+        node = actionengine.AsyncNode("test")
+
+        async def produce():
+            for word in ("Hello, ", "world!"):
+                await node.put(word)
+            await node.finalize()
+
+        async def consume():
+            assert (await node.next_fragment()).chunk.data.decode() == "Hello, "
+            assert (await node.next_fragment()).chunk.data.decode() == "world!"
+            assert await node.next_fragment() is None
+
+        await asyncio.gather(
+            produce(),
+            consume(),
+        )

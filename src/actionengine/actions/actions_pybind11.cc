@@ -154,8 +154,10 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
 
     user_data->asyncio_future.attr("get_loop")().attr("call_soon_threadsafe")(
         py::cpp_function([result = std::move(result),
-                          exc_text = std::move(exc_text), user_data, error] {
+                          exc_text = std::move(exc_text), user_data,
+                          error]() mutable {
           if (user_data->asyncio_future.attr("done")().cast<bool>()) {
+            result = py::object();
             return;
           }
           if (!error) {
@@ -165,6 +167,7 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
                 PyObject_CallFunction(PyExc_RuntimeError, "s",
                                       exc_text.c_str()));
           }
+          result = py::object();
         }));
 
     if (error) {

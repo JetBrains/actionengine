@@ -54,11 +54,22 @@ class LocalChunkStore final : public ChunkStore {
 
   void Notify() override;
 
+  absl::StatusOr<Chunk> Get(int64_t seq, absl::Duration timeout) override;
+
   absl::StatusOr<std::reference_wrapper<const Chunk>> GetRef(
-      int64_t seq, absl::Duration timeout) override;
+      int64_t seq, absl::Duration timeout) override {
+    act::MutexLock lock(&mu_);
+    return GetRef_(seq, timeout);
+  }
+
+  absl::StatusOr<Chunk> GetByArrivalOrder(int64_t arrival_offset,
+                                          absl::Duration timeout) override;
 
   absl::StatusOr<std::reference_wrapper<const Chunk>> GetRefByArrivalOrder(
-      int64_t arrival_offset, absl::Duration timeout) override;
+      int64_t arrival_offset, absl::Duration timeout) override {
+    act::MutexLock lock(&mu_);
+    return GetRefByArrivalOrder_(arrival_offset, timeout);
+  }
 
   absl::StatusOr<std::optional<Chunk>> Pop(int64_t seq) override;
 
@@ -81,6 +92,13 @@ class LocalChunkStore final : public ChunkStore {
 
  private:
   void ClosePutsAndAwaitPendingOperations() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
+  absl::StatusOr<std::reference_wrapper<const Chunk>> GetRef_(
+      int64_t seq, absl::Duration timeout) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
+  absl::StatusOr<std::reference_wrapper<const Chunk>> GetRefByArrivalOrder_(
+      int64_t arrival_offset, absl::Duration timeout)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   mutable act::Mutex mu_;
 

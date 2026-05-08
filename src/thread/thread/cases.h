@@ -15,6 +15,8 @@
 #ifndef THREAD_FIBER_CASES_H_
 #define THREAD_FIBER_CASES_H_
 
+#include <absl/log/check.h>
+
 #include "thread/boost_primitives.h"
 
 namespace thread {
@@ -85,7 +87,8 @@ struct [[nodiscard]] Case {
 
   Case(internal::Selectable* absl_nullable s, internal::IsPointer auto... args)
       : selectable(s) {
-    AddArgs(args...);
+    (arguments.push_back(const_cast<void*>(static_cast<const void*>(args))),
+     ...);
   }
 
   Case(const Case&) = default;
@@ -96,15 +99,15 @@ struct [[nodiscard]] Case {
   template <typename... Args>
   Case(bool, Args... args) = delete;
 
-  void AddArgs(internal::IsNonConstPointer auto arg) {
-    arguments.push_back(static_cast<void*>(arg));
-  }
-
-  void AddArgs(internal::IsConstPointer auto arg) {
+  template <typename T>
+  void AddArg(const T* absl_nonnull arg) {
     arguments.push_back(const_cast<void*>(static_cast<const void*>(arg)));
   }
 
-  void AddArgs(internal::IsPointer auto... args) { (AddArgs(args), ...); }
+  template <typename T>
+  void AddArg(T* absl_nonnull arg) {
+    arguments.push_back(static_cast<void*>(arg));
+  }
 
   [[nodiscard]] void* absl_nonnull GetArgPtr(int index) const {
     if (index < 0 || index >= arguments.size()) {
@@ -217,12 +220,18 @@ inline void CaseInSelectClause::Unregister() {
 // is a pointer to the oldest element added to the list.
 inline void PushBack(CaseInSelectClause* absl_nonnull* absl_nonnull head,
                      CaseInSelectClause* absl_nonnull element) {
+  CHECK_EQ(element->prev, nullptr)
+      << "Attempted to enqueue a CaseInSelectClause that is already on a list";
+
   if (*head == nullptr) {
     // Queue is empty; make singleton queue.
     element->next = element;
     element->prev = element;
     *head = element;
   } else {
+    CHECK_NE((*head)->prev, nullptr)
+        << "Waiter list head is corrupt: non-null head has null prev";
+
     // Add just before the oldest element (*head).
     element->next = *head;
     element->prev = element->next->prev;

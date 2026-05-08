@@ -25,11 +25,15 @@
 #ifndef ACTIONENGINE_CONCURRENCY_CONCURRENCY_H_
 #define ACTIONENGINE_CONCURRENCY_CONCURRENCY_H_
 
+#include <any>
+
 #include <absl/base/attributes.h>
 #include <absl/base/nullability.h>
 #include <absl/base/thread_annotations.h>
+#include <absl/status/statusor.h>
 #include <absl/time/time.h>
 
+#include "absl/container/flat_hash_map.h"
 #include "thread/concurrency.h"
 
 // IWYU pragma: begin_exports
@@ -122,6 +126,230 @@ using concurrency::MutexLock;
 inline void SleepFor(absl::Duration duration) {
   concurrency::SleepFor(duration);
 }
+
+template <typename T>
+class FutureState {
+ public:
+  friend class FutureT;
+
+  FutureState() = default;
+
+  FutureState(const FutureState&) = delete;
+  FutureState& operator=(const FutureState&) = delete;
+
+  ~FutureState() {
+    act::MutexLock lock(&mu_);
+    if (pending_waiters_ > 0) {
+      if (!result_has_been_set_) {
+        if (const absl::Status set_error_status =
+                SetError_(absl::AbortedError("Future is being destroyed."));
+            !set_error_status.ok()) {
+          DLOG(WARNING) << "Could not set error while destroying a future.";
+          return;
+        }
+      }
+
+      // We let the waiter(s) deal with the result before destroying.
+      while (pending_waiters_ > 0) {
+        cv_.Wait(&mu_);
+      }
+    }
+  }
+
+  void AddCallback(
+      absl::AnyInvocable<void(FutureState<T>* absl_nonnull)> callback) {
+    act::MutexLock lock(&mu_);
+    if (result_has_been_set_) {
+      mu_.unlock();
+      std::move(callback)(this);
+      mu_.lock();
+      return;
+    }
+    callbacks_.push_back(std::move(callback));
+  }
+
+  absl::Status SetValue(T value) {
+    act::MutexLock lock(&mu_);
+    return SetValue_(std::move(value));
+  }
+
+  absl::Status SetError(absl::Status error) {
+    act::MutexLock lock(&mu_);
+    return SetError_(std::move(error));
+  }
+
+  void Cancel() {
+    act::MutexLock lock(&mu_);
+    Cancel_();
+  }
+
+  bool Cancelled() const {
+    act::MutexLock lock(&mu_);
+    return cancelled_;
+  }
+
+  bool Expired() const {
+    act::MutexLock lock(&mu_);
+    return absl::Now() >= deadline_;
+  }
+
+  absl::Time deadline() const {
+    act::MutexLock lock(&mu_);
+    return deadline_;
+  }
+
+  void SetDeadline(absl::Time deadline) {
+    act::MutexLock lock(&mu_);
+    deadline_ = deadline;
+    cv_.SignalAll();
+  }
+
+  absl::StatusOr<T> WaitForValueOrErrorUntil(
+      absl::Time deadline = absl::InfiniteFuture()) {
+    act::MutexLock lock(&mu_);
+    ++pending_waiters_;
+    absl::StatusOr<T> result = WaitForValueOrErrorUntil_(deadline);
+    --pending_waiters_;
+    cv_.SignalAll();
+    return result;
+  }
+
+  bool HasValueOrError() const {
+    act::MutexLock lock(&mu_);
+    return result_has_been_set_;
+  }
+
+ private:
+  void ExecuteCallbacks_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    for (auto& callback : callbacks_) {
+      mu_.unlock();
+      callback(this);
+      mu_.lock();
+    }
+    callbacks_.clear();
+  }
+
+  void Cancel_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    if (result_has_been_set_) {
+      return;
+    }
+    cancelled_ = true;
+    SetError_(absl::CancelledError("Cancelled.")).IgnoreError();
+  }
+
+  absl::StatusOr<T> WaitForValueOrErrorUntil_(
+      absl::Time desired_deadline = absl::InfiniteFuture())
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    while (!result_has_been_set_ && !result_has_been_awaited_) {
+      const absl::Time now = absl::Now();
+      if (now >= desired_deadline || now >= deadline_) {
+        break;
+      }
+      cv_.WaitWithDeadline(
+          &mu_, desired_deadline < deadline_ ? desired_deadline : deadline_);
+    }
+
+    // It would be a mistake to make several WaitForValueOrErrorUntil calls,
+    // but check for that anyway.
+    if (result_has_been_awaited_) {
+      return absl::FailedPreconditionError("Result has already been awaited.");
+    }
+
+    // Optimistic: if there is a result, return it even if past the deadline
+    if (result_has_been_set_) {
+      absl::StatusOr<T> result = std::move(result_);
+
+      // Clear the state
+      result_ = absl::StatusOr<T>();
+      result_has_been_awaited_ = true;
+      cv_.SignalAll();
+
+      return result;
+    }
+
+    return absl::DeadlineExceededError(
+        "Deadline exceeded waiting for Future result.");
+  }
+
+  absl::Status SetValue_(T value) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    if (result_has_been_set_) {
+      return absl::FailedPreconditionError("Cannot set result twice.");
+    }
+
+    if (cancelled_) {
+      return SetError_(absl::CancelledError("Cancelled."));
+    }
+
+    if (absl::Now() > deadline_) {
+      return SetError_(absl::DeadlineExceededError("Deadline exceeded"));
+    }
+
+    result_ = std::move(value);
+    result_has_been_set_ = true;
+    ExecuteCallbacks_();
+    cv_.SignalAll();
+
+    return absl::OkStatus();
+  }
+
+  absl::Status SetError_(absl::Status error)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    if (error.ok()) {
+      return absl::InvalidArgumentError(
+          "SetError must be called with a non-ok status.");
+    }
+    if (result_has_been_set_) {
+      return absl::FailedPreconditionError(
+          "FutureState already has been set with a result or an error.");
+    }
+
+    result_has_been_set_ = true;
+    result_ = std::move(error);
+    ExecuteCallbacks_();
+    cv_.SignalAll();
+
+    return absl::OkStatus();
+  }
+
+  mutable act::Mutex mu_;
+  act::CondVar cv_ ABSL_GUARDED_BY(mu_);
+  absl::StatusOr<T> result_ ABSL_GUARDED_BY(mu_);
+
+  bool cancelled_ ABSL_GUARDED_BY(mu_);
+  bool result_has_been_set_ ABSL_GUARDED_BY(mu_) = false;
+  bool result_has_been_awaited_ ABSL_GUARDED_BY(mu_) = false;
+  uint8_t pending_waiters_ ABSL_GUARDED_BY(mu_) = 0;
+  absl::Time deadline_ ABSL_GUARDED_BY(mu_) = absl::InfiniteFuture();
+  std::vector<absl::AnyInvocable<void(FutureState<T>* absl_nonnull)>> callbacks_
+      ABSL_GUARDED_BY(mu_);
+};
+
+template <typename T>
+class Future {
+ public:
+  using State = FutureState<T>;
+
+  Future() : state_(std::make_unique<FutureState<T>>()) {}
+
+  Future(Future&& other) noexcept : state_(std::move(other.state_)) {}
+
+  absl::Status SetValue(T value) const {
+    return state_->SetValue(std::move(value));
+  }
+
+  absl::Status SetError(absl::Status error) const {
+    return state_->SetError(std::move(error));
+  }
+
+  absl::StatusOr<T> WaitUntil(absl::Time deadline = absl::InfiniteFuture()) {
+    return state_->WaitForValueOrErrorUntil(deadline);
+  }
+
+  std::shared_ptr<State> state() { return state_; }
+
+ private:
+  std::shared_ptr<State> state_;
+};
 
 }  // namespace act
 

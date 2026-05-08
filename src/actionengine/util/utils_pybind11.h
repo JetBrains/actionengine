@@ -55,7 +55,7 @@ auto MakeSameObjectRefConstructor() {
  *   The pointer to the object to be exposed.
  */
 template <typename T>
-std::shared_ptr<T> ShareWithNoDeleter(T* ptr) {
+std::shared_ptr<T> ShareWithNoDeleter(T* absl_nullable ptr) {
   return std::shared_ptr<T>(ptr, [](T*) {});
 }
 
@@ -136,6 +136,58 @@ struct keep_event_loop_memo {};
 absl::StatusOr<py::object> RunThreadsafeIfCoroutine(
     py::object function_call_result, py::object loop = py::none(),
     bool return_future = false);
+
+PyObject* absl_nonnull StatusToPyException(const absl::Status& status);
+
+absl::Status PyExceptionToStatus(const py::error_already_set& exc);
+
+template <typename T>
+absl::Status SetAsyncioFutureResult(py::handle future, T value) {
+  try {
+    future.attr("get_loop")().attr("call_soon_threadsafe")(
+        py::cpp_function([value = std::forward<T>(value),
+                          future = py::cast<py::object>(future)]() mutable {
+          if (future.attr("done")().cast<bool>()) {
+            future = py::object();
+            return;
+          }
+          future.attr("set_result")(std::forward<T>(value));
+          future = py::object();
+        }));
+    return absl::OkStatus();
+  } catch (const py::error_already_set& exc) {
+    return PyExceptionToStatus(exc);
+  }
+}
+
+template <typename T>
+absl::Status SetAsyncioFutureResult(py::handle future,
+                                    absl::StatusOr<T> value) {
+  try {
+    future.attr("get_loop")().attr("call_soon_threadsafe")(
+        py::cpp_function([value = std::forward<T>(value),
+                          future = py::cast<py::object>(future)]() mutable {
+          if (future.attr("done")().cast<bool>()) {
+            future = py::object();
+            return;
+          }
+          if (!value.ok()) {
+            future.attr("set_exception")(
+                StatusToPyException(std::forward<T>(value).status()));
+            future = py::object();
+            return;
+          }
+          future.attr("set_result")(std::forward<T>(value));
+          future = py::object();
+        }));
+
+    return absl::OkStatus();
+  } catch (const py::error_already_set& exc) {
+    return PyExceptionToStatus(exc);
+  }
+}
+
+absl::Status SetAsyncioFutureResult(py::handle future, absl::Status status);
 
 }  // namespace act::pybindings
 

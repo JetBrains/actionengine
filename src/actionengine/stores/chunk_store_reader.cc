@@ -148,6 +148,28 @@ absl::StatusOr<std::optional<NodeFragment>> ChunkStoreReader::NextFragment(
                       final_seq == -1 || seq != final_seq};
 }
 
+absl::StatusOr<act::Future<std::optional<NodeFragment>>>
+ChunkStoreReader::NextNodeFragmentFuture() {
+  act::MutexLock lock(&mu_);
+  EnsurePrefetchIsRunningOrHasCompleted();
+  if (!status_.ok()) {
+    return status_;
+  }
+
+  act::Future<std::optional<NodeFragment>> future;
+  waiters_.push_back(future.state());
+  // If there is something in the buffer already, populate the future now:
+  RETURN_IF_ERROR(FanoutBufferToWaiters());
+
+  // If not populated and there are no values to come, set to nullopt.
+  if (buffer_->length() == 0 && !loop_started_and_running_ &&
+      !future.state()->HasValueOrError()) {
+    RETURN_IF_ERROR(future.SetValue(std::nullopt));
+  }
+
+  return future;
+}
+
 template <>
 absl::StatusOr<std::optional<std::pair<int, Chunk>>> ChunkStoreReader::Next(
     std::optional<absl::Duration> timeout) {
@@ -300,17 +322,90 @@ absl::Status ChunkStoreReader::RunPrefetchLoop()
 
     ++total_chunks_read_;
 
-    mu_.unlock();
-    buffer_->writer()->Write(std::make_pair(next_seq, std::move(next_chunk)));
-    mu_.lock();
+    std::pair<int, Chunk> next_seq_and_chunk =
+        std::make_pair(next_seq, std::move(next_chunk));
+    buffer_->writer()->Write(std::move(next_seq_and_chunk));
+
+    if (absl::Status fanout_status = FanoutBufferToWaiters();
+        !fanout_status.ok()) {
+      status = fanout_status;
+      break;
+    }
   }
 
   buffer_->writer()->Close();
+  RETURN_IF_ERROR(FanoutBufferToWaiters());
+
+  // Any waiters left at this point will NOT receive any value; populate them
+  // with errors.
+  while (!waiters_.empty()) {
+    const std::shared_ptr<NodeFragmentFuture::State> waiter = waiters_.front();
+    waiters_.pop_front();
+    waiter->SetError(absl::ResourceExhaustedError("The reader has finished."))
+        .IgnoreError();
+  }
 
   if (thread::Cancelled()) {
     status.Update(absl::CancelledError("Prefetcher fiber was cancelled."));
   }
   return status;
+}
+
+absl::Status ChunkStoreReader::FanoutBufferToWaiters() {
+  while (!waiters_.empty() && buffer_->length() > 0) {
+    const std::shared_ptr<NodeFragmentFuture::State> waiter = waiters_.front();
+    waiters_.pop_front();
+
+    // TODO: it should not be the reader's responsibility to set these
+    //       statuses.
+    if (waiter->Cancelled()) {
+      mu_.unlock();
+      waiter->SetError(absl::CancelledError("Cancelled.")).IgnoreError();
+      mu_.lock();
+      continue;
+    }
+    if (waiter->Expired()) {
+      mu_.unlock();
+      waiter->SetError(absl::DeadlineExceededError("Deadline exceeded."))
+          .IgnoreError();
+      mu_.lock();
+      continue;
+    }
+
+    std::optional<std::pair<int, Chunk>> value_from_buffer;
+    buffer_->reader()->Read(&value_from_buffer);
+
+    absl::Status populate_status;
+
+    if (!value_from_buffer || value_from_buffer->second.IsNull()) {
+      mu_.unlock();
+      populate_status = waiter->SetValue(std::nullopt);
+      mu_.lock();
+      RETURN_IF_ERROR(populate_status);
+      continue;
+    }
+    std::optional<NodeFragment> fragment_from_buffer;
+    if (value_from_buffer) {
+      fragment_from_buffer.emplace();
+      ASSIGN_OR_RETURN(const int64_t final_seq, chunk_store_->GetFinalSeq());
+      int seq = value_from_buffer->first;
+      fragment_from_buffer->seq = seq;
+      fragment_from_buffer->data = std::move(value_from_buffer->second);
+      fragment_from_buffer->continued = final_seq == -1 || seq != final_seq;
+    }
+    mu_.unlock();
+    populate_status = waiter->SetValue(std::move(fragment_from_buffer));
+    mu_.lock();
+    RETURN_IF_ERROR(populate_status);
+  }
+
+  // For consistency, if any non-Future reads are pending, let them consume
+  // data (even though this can delay prefetching ever so slightly)
+  while (pending_ops_ > 0 && buffer_->length() > 0) {
+    cv_.Wait(&mu_);
+  }
+
+  return absl::OkStatus();
 }
 
 template <>
@@ -347,6 +442,7 @@ void ChunkStoreReader::EnsurePrefetchIsRunningOrHasCompleted()
     return;
   }
 
+  loop_started_and_running_ = true;
   buffer_ =
       std::make_unique<thread::Channel<std::optional<std::pair<int, Chunk>>>>(
           options_.n_chunks_to_buffer_or_default());
@@ -355,6 +451,8 @@ void ChunkStoreReader::EnsurePrefetchIsRunningOrHasCompleted()
   fiber_ = thread::NewTree({}, [this] {
     act::MutexLock lock(&mu_);
     status_ = RunPrefetchLoop();
+    loop_started_and_running_ = false;
+    cv_.SignalAll();
   });
 }
 

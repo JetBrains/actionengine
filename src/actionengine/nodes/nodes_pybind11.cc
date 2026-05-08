@@ -125,161 +125,160 @@ void BindAsyncNode(py::handle scope, std::string_view name) {
       .def(
           "next_fragment",
           [](const std::shared_ptr<AsyncNode>& self, double timeout = -1.0,
-             py::handle future =
-                 py::none()) -> absl::StatusOr<std::optional<NodeFragment>> {
-            absl::Duration timeout_duration =
+             py::handle asyncio_future = py::none()) -> absl::Status {
+            const absl::Duration timeout_duration =
                 timeout < 0 ? absl::InfiniteDuration() : absl::Seconds(timeout);
 
-            if (future.is_none()) {
-              absl::StatusOr<std::optional<NodeFragment>> result =
-                  self->Next<NodeFragment>(timeout_duration);
-              if (!result.ok()) {
-                absl::Status status(
-                    result.status().code(),
-                    absl::StrCat(absl::StrFormat("[%s]: ", self->GetId()),
-                                 result.status().message()));
-                return status;
-              }
-              return *std::move(result);
-            }
+            ASSIGN_OR_RETURN(
+                act::Future<std::optional<NodeFragment>> node_fragment_future,
+                self->GetReader().NextNodeFragmentFuture());
+            node_fragment_future.state()->SetDeadline(absl::Now() +
+                                                      timeout_duration);
 
-            // try to get the fragment right away to save a fiber
-            absl::StatusOr<std::optional<NodeFragment>> zero_timeout_result =
-                self->Next<NodeFragment>(absl::ZeroDuration());
-            if (ABSL_PREDICT_TRUE(zero_timeout_result.ok())) {
-              future.attr("set_result")(*std::move(zero_timeout_result));
-              return std::nullopt;
-            }
+            absl::AnyInvocable<void(
+                act::Future<std::optional<NodeFragment>>::State* absl_nonnull)>
+                callback;
+            {
+              py::gil_scoped_acquire gil;
+              // on cancellation from Python, cancel the C++ future
+              asyncio_future.attr("add_done_callback")(
+                  py::cpp_function([cpp_future = node_fragment_future.state()](
+                                       py::handle future) {
+                    if (!future.attr("cancelled")().cast<bool>()) {
+                      return;
+                    }
+                    cpp_future->Cancel();
+                  }));
 
-            thread::Detach({}, [future = py::cast<py::object>(future),
-                                timeout_duration, node = self]() mutable {
-              auto done = std::make_shared<thread::PermanentEvent>();
-              {
-                py::gil_scoped_acquire gil;
-                future.attr("add_done_callback")(
-                    py::cpp_function([current_fiber = thread::Fiber::Current(),
-                                      done](py::handle future) {
-                      py::gil_scoped_acquire gil;
-                      if (!future.attr("cancelled")().cast<bool>()) {
-                        return;
-                      }
-                      if (!done->HasBeenNotified()) {
-                        current_fiber->Cancel();
-                      }
-                    }));
-              }
+              // on result, resolve Python future
+              // ReSharper disable once CppTooWideScope
+              // (the scope is correct as this callback must be created with
+              // GIL held)
+              callback = [asyncio_future =
+                              py::cast<py::object>(asyncio_future)](
+                             act::Future<std::optional<NodeFragment>>::
+                                 State* absl_nonnull cpp_future) mutable {
+                absl::StatusOr<std::optional<NodeFragment>> result =
+                    cpp_future->WaitForValueOrErrorUntil(absl::InfinitePast());
 
-              absl::StatusOr<std::optional<NodeFragment>> result =
-                  node->Next<NodeFragment>(timeout_duration);
-              done->Notify();
-
-              {
-                py::gil_scoped_acquire gil;
-                absl::Status status;
                 if (!result.ok()) {
-                  status = absl::Status(
-                      result.status().code(),
-                      absl::StrCat(absl::StrFormat("[%s]: ", node->GetId()),
-                                   result.status().message()));
+                  {
+                    py::gil_scoped_acquire gil;
+                    if (const absl::Status status = SetAsyncioFutureResult(
+                            asyncio_future, result.status());
+                        !status.ok()) {
+                      DLOG(ERROR) << status;
+                    }
+                    asyncio_future = py::object();
+                  }
+                  return;
                 }
-                future.attr("get_loop")().attr("call_soon_threadsafe")(
-                    py::cpp_function(
-                        [status, future, result = std::move(result)]() {
-                          if (future.attr("done")().cast<bool>()) {
-                            return;
-                          }
-                          if (!status.ok()) {
-                            future.attr("set_exception")(PyObject_CallFunction(
-                                PyExc_RuntimeError, "s", status.message()));
-                            return;
-                          }
-                          future.attr("set_result")(*std::move(result));
-                        }));
-                future = py::object();
-              }
-            });
-            return std::nullopt;
+
+                {
+                  py::gil_scoped_acquire gil;
+                  if (const absl::Status status = SetAsyncioFutureResult(
+                          asyncio_future, *std::move(result));
+                      !status.ok()) {
+                    DLOG(ERROR) << status;
+                  }
+                  asyncio_future = py::object();
+                }
+              };
+            }
+            node_fragment_future.state()->AddCallback(std::move(callback));
+            return absl::OkStatus();
           },
-          py::arg_v("timeout", -1.0), py::arg_v("future", py::none()))
+          py::arg_v("timeout", -1.0), py::arg_v("future", py::none()),
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "next_chunk",
           [](const std::shared_ptr<AsyncNode>& self, double timeout = -1.0,
-             py::handle future =
-                 py::none()) -> absl::StatusOr<std::optional<Chunk>> {
-            absl::Duration timeout_duration =
+             py::handle asyncio_future = py::none()) -> absl::Status {
+            const absl::Duration timeout_duration =
                 timeout < 0 ? absl::InfiniteDuration() : absl::Seconds(timeout);
 
-            if (future.is_none()) {
-              absl::StatusOr<std::optional<Chunk>> result =
-                  self->Next<Chunk>(timeout_duration);
-              if (!result.ok()) {
-                absl::Status status(
-                    result.status().code(),
-                    absl::StrCat(absl::StrFormat("[%s]: ", self->GetId()),
-                                 result.status().message()));
-                return status;
-              }
-              return *std::move(result);
-            }
+            ASSIGN_OR_RETURN(
+                act::Future<std::optional<NodeFragment>> node_fragment_future,
+                self->GetReader().NextNodeFragmentFuture());
+            node_fragment_future.state()->SetDeadline(absl::Now() +
+                                                      timeout_duration);
 
-            // try to get the chunk right away to save a fiber
-            absl::StatusOr<std::optional<Chunk>> zero_timeout_result =
-                self->Next<Chunk>(absl::ZeroDuration());
-            if (ABSL_PREDICT_TRUE(zero_timeout_result.ok())) {
-              future.attr("set_result")(*std::move(zero_timeout_result));
-              return std::nullopt;
-            }
+            absl::AnyInvocable<void(
+                act::Future<std::optional<NodeFragment>>::State* absl_nonnull)>
+                callback;
+            {
+              py::gil_scoped_acquire gil;
+              // on cancellation from Python, cancel the C++ future
+              asyncio_future.attr("add_done_callback")(
+                  py::cpp_function([cpp_future = node_fragment_future.state()](
+                                       py::handle future) {
+                    if (!future.attr("cancelled")().cast<bool>()) {
+                      return;
+                    }
+                    cpp_future->Cancel();
+                  }));
 
-            thread::Detach({}, [future = py::cast<py::object>(future),
-                                timeout_duration, node = self]() mutable {
-              auto done = std::make_shared<thread::PermanentEvent>();
-              {
-                py::gil_scoped_acquire gil;
-                future.attr("add_done_callback")(
-                    py::cpp_function([current_fiber = thread::Fiber::Current(),
-                                      done](py::handle future) {
-                      py::gil_scoped_acquire gil;
-                      if (!future.attr("cancelled")().cast<bool>()) {
-                        return;
-                      }
-                      if (!done->HasBeenNotified()) {
-                        current_fiber->Cancel();
-                      }
-                    }));
-              }
+              // on result, resolve Python future
+              // ReSharper disable once CppTooWideScope
+              // (the scope is correct as this callback must be created with
+              // GIL held)
+              callback = [asyncio_future =
+                              py::cast<py::object>(asyncio_future)](
+                             act::Future<std::optional<NodeFragment>>::
+                                 State* absl_nonnull cpp_future) mutable {
+                absl::StatusOr<std::optional<NodeFragment>> result =
+                    cpp_future->WaitForValueOrErrorUntil(absl::InfinitePast());
 
-              absl::StatusOr<std::optional<Chunk>> result =
-                  node->Next<Chunk>(timeout_duration);
-              done->Notify();
-
-              {
-                py::gil_scoped_acquire gil;
-                absl::Status status;
                 if (!result.ok()) {
-                  status = absl::Status(
-                      result.status().code(),
-                      absl::StrCat(absl::StrFormat("[%s]: ", node->GetId()),
-                                   result.status().message()));
+                  {
+                    py::gil_scoped_acquire gil;
+                    if (const absl::Status status = SetAsyncioFutureResult(
+                            asyncio_future, result.status());
+                        !status.ok()) {
+                      DLOG(ERROR) << status;
+                    }
+                    asyncio_future = py::object();
+                    return;
+                  }
                 }
-                future.attr("get_loop")().attr("call_soon_threadsafe")(
-                    py::cpp_function(
-                        [status, future, result = std::move(result)]() {
-                          if (future.attr("done")().cast<bool>()) {
-                            return;
-                          }
-                          if (!status.ok()) {
-                            future.attr("set_exception")(PyObject_CallFunction(
-                                PyExc_RuntimeError, "s", status.message()));
-                            return;
-                          }
-                          future.attr("set_result")(*std::move(result));
-                        }));
-                future = py::object();
-              }
-            });
-            return std::nullopt;
+
+                std::optional<Chunk> chunk;
+                if (*result) {
+                  if (absl::StatusOr<std::reference_wrapper<Chunk>>
+                          result_as_chunk = (*result)->GetChunk();
+                      result_as_chunk.ok()) {
+                    chunk = std::move(result_as_chunk.value());
+                  } else {
+                    {
+                      py::gil_scoped_acquire gil;
+                      if (const absl::Status status = SetAsyncioFutureResult(
+                              asyncio_future, result_as_chunk.status());
+                          !status.ok()) {
+                        DLOG(ERROR) << status;
+                      }
+                      asyncio_future = py::object();
+                    }
+                    return;
+                  }
+                }
+
+                {
+                  py::gil_scoped_acquire gil;
+                  if (const absl::Status status = SetAsyncioFutureResult(
+                          asyncio_future, std::move(chunk));
+                      !status.ok()) {
+                    DLOG(ERROR) << status;
+                  }
+                  asyncio_future = py::object();
+                }
+              };
+            }
+
+            node_fragment_future.state()->AddCallback(std::move(callback));
+            return absl::OkStatus();
           },
-          py::arg_v("timeout", -1.0), py::arg_v("future", py::none()))
+          py::arg_v("timeout", -1.0), py::arg_v("future", py::none()),
+          py::call_guard<py::gil_scoped_release>())
       .def("get_id",
            [](const std::shared_ptr<AsyncNode>& self) { return self->GetId(); })
       .def(

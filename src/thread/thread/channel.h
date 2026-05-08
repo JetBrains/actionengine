@@ -508,6 +508,7 @@ bool ReadSelectable<T>::Handle(CaseInSelectClause* absl_nonnull reader,
     channel->waiters_.UnlockAndReleaseReader(reader);
     channel->waiters_.UnlockAndReleaseWriter(writer);
     DCHECK(channel->Invariants());
+    return true;
   }
 
   reader->selector->mu.Lock();

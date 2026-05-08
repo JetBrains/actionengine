@@ -20,72 +20,70 @@
 #include <absl/base/call_once.h>
 #include <boost/fiber/algo/shared_work.hpp>
 #include <boost/fiber/context.hpp>
-#include <latch>
 
 #include "thread/fiber.h"
-#include "thread/util.h"
 
 namespace thread {
+
+WorkerThreadPool::~WorkerThreadPool() {
+  thread::NewTree({}, [this]() {
+    act::concurrency::impl::MutexLock lock(&mu_);
+    shutdown_ = true;
+    cv_.SignalAll();
+    for (auto& [thread] : workers_) {
+      thread.join();
+    }
+  })->Join();
+}
+
 void WorkerThreadPool::Start(size_t num_threads) {
-  act::concurrency::impl::MutexLock lock(&mu_);
-  schedulers_.resize(num_threads);
-  std::latch latch(num_threads);
   for (size_t idx = 0; idx < num_threads; ++idx) {
-    Worker worker{
-        .thread = std::thread([this, idx, &latch] {
+    workers_.push_back({
+        .thread = std::thread([this, idx] {
           EnsureThreadHasScheduler<boost::fibers::algo::shared_work>(
               /*suspend=*/true);
-          schedulers_[idx] = boost::fibers::context::active()->get_scheduler();
-          latch.count_down();
-          // TODO: cancellation
-          while (!Cancelled()) {
-            boost::fibers::context::active()->suspend();
+
+          act::concurrency::impl::MutexLock lock(&mu_);
+          while (!shutdown_) {
+            cv_.Wait(&mu_);
+            if (shutdown_) {
+              break;
+            }
+            while (!work_queue_.empty()) {
+              boost::intrusive_ptr<boost::fibers::context> ctx =
+                  work_queue_.front();
+              work_queue_.pop_front();
+
+              boost::fibers::context* active_ctx =
+                  boost::fibers::context::active();
+
+              active_ctx->attach(ctx.get());
+              active_ctx->schedule(ctx.get());
+            }
           }
           DLOG(INFO) << absl::StrFormat("Worker %zu exiting.", idx);
         }),
-    };
-    workers_.push_back(std::move(worker));
-  }
-  latch.wait();
-
-  for (auto& [thread] : workers_) {
-    thread.detach();
+    });
   }
 }
 
-void WorkerThreadPool::Schedule(boost::fibers::context* ctx) {
-  size_t worker_idx =
-      worker_idx_.fetch_add(1, std::memory_order_relaxed) % workers_.size();
-
-  const auto active_ctx = boost::fibers::context::active();
-
-  if constexpr (!kScheduleOnSelf) {
-    while (schedulers_[worker_idx] == active_ctx->get_scheduler()) {
-      worker_idx = Rand32() % workers_.size();
-    }
-  }
-
-  if (schedulers_[worker_idx] == active_ctx->get_scheduler()) {
-    active_ctx->attach(ctx);
-    schedulers_[worker_idx]->schedule(ctx);
-  } else {
-    {
-      act::concurrency::impl::MutexLock lock(&mu_);
-      if (ctx->get_scheduler() != nullptr) {
-        return;
-      }
-      schedulers_[worker_idx]->attach_worker_context(ctx);
-      schedulers_[worker_idx]->schedule_from_remote(ctx);
-    }
-  }
+void WorkerThreadPool::Schedule(
+    boost::intrusive_ptr<boost::fibers::context> ctx) {
+  act::concurrency::impl::MutexLock lock(&mu_);
+  CHECK(ctx->get_scheduler() == nullptr)
+      << "Cannot schedule an already scheduled context.";
+  work_queue_.push_back(std::move(ctx));
+  cv_.Signal();
 }
 
 WorkerThreadPool& WorkerThreadPool::Instance() {
-  static WorkerThreadPool instance;
-  if (instance.workers_.empty()) {
-    instance.Start();
-  }
-  return instance;
+  static WorkerThreadPool* instance = [] {
+    auto* pool = new WorkerThreadPool();
+    pool->Start();
+    return pool;
+  }();
+
+  return *instance;
 }
 
 static absl::once_flag kInitWorkerThreadPoolFlag;

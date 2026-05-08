@@ -33,6 +33,7 @@
 
 namespace {
 
+using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 using ::testing::ElementsAre;
@@ -96,7 +97,7 @@ TEST(ChunkStoreTest, WrittenChunksAreReadable) {
 TEST(ChunkStoreTest, CanReadChunksAsynchronously) {
   // Even though writes happen in the background, in some runs the writer will
   // finish before the reader starts, so we run the test multiple times.
-  for (int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 1000; ++i) {
     act::LocalChunkStore chunk_store;
     act::ChunkStoreWriter writer(&chunk_store);
     act::ChunkStoreReader reader(&chunk_store, {.ordered = true});
@@ -112,6 +113,50 @@ TEST(ChunkStoreTest, CanReadChunksAsynchronously) {
 
     EXPECT_OK(reader.GetStatus());  // Check that the reader is still OK.
     EXPECT_EQ(read_words, words);
+    CHECK(read_words[0] == words[0]);
+  }
+}
+
+TEST(ChunkStoreTest, CanReadChunksViaFutures) {
+  // Even though writes happen in the background, in some runs the writer will
+  // finish before the reader starts, so we run the test multiple times.
+  for (int i = 0; i < 1000; ++i) {
+    act::LocalChunkStore chunk_store;
+    act::ChunkStoreWriter writer(&chunk_store);
+    act::ChunkStoreReader reader(&chunk_store, {.ordered = true});
+
+    std::vector<std::string> words = {"Hello", "World", "!"};
+    writer << words << act::EndOfStream();
+
+    // ------- NOT waiting for all chunks to arrive. -------
+    // Reader should be able to read the chunks as they arrive.
+
+    std::vector<std::string> read_words;
+    for (auto word_idx = 0; word_idx < words.size(); ++word_idx) {
+      absl::StatusOr<act::Future<std::optional<act::NodeFragment>>> future =
+          reader.NextNodeFragmentFuture();
+      ASSERT_TRUE(future.status().ok());
+      auto node_fragment =
+          future->WaitUntil(absl::Now() + absl::Milliseconds(10));
+      ASSERT_THAT(node_fragment.status(), IsOk());
+      ASSERT_TRUE(node_fragment->has_value());
+      EXPECT_EQ((*node_fragment)->seq, word_idx);
+      EXPECT_EQ(std::get<Chunk>((*node_fragment)->data).data, words[word_idx]);
+      read_words.push_back(words[word_idx]);
+    }
+
+    absl::StatusOr<act::Future<std::optional<act::NodeFragment>>> future =
+        reader.NextNodeFragmentFuture();
+    ASSERT_TRUE(future.status().ok());
+    auto seq_and_chunk =
+        future->WaitUntil(absl::Now() + absl::Milliseconds(10));
+    ASSERT_THAT(seq_and_chunk.status(), IsOk());
+    EXPECT_FALSE(seq_and_chunk->has_value());
+    EXPECT_TRUE(std::get<Chunk>((*seq_and_chunk)->data).IsNull());
+
+    EXPECT_OK(reader.GetStatus());  // Check that the reader is still OK.
+    EXPECT_EQ(read_words, words);
+    // CHECK(read_words[0] == words[0]);
   }
 }
 

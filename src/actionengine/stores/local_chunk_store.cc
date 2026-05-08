@@ -58,9 +58,44 @@ void LocalChunkStore::Notify() {
   cv_.SignalAll();
 }
 
-absl::StatusOr<std::reference_wrapper<const Chunk>> LocalChunkStore::GetRef(
-    int64_t seq, absl::Duration timeout) {
+absl::StatusOr<Chunk> LocalChunkStore::Get(int64_t seq,
+                                           absl::Duration timeout) {
   act::MutexLock lock(&mu_);
+
+  ++num_pending_ops_;
+  absl::StatusOr<std::reference_wrapper<const Chunk>> chunk_ref =
+      GetRef_(seq, timeout);
+  if (!chunk_ref.ok()) {
+    --num_pending_ops_;
+    cv_.SignalAll();
+    return chunk_ref.status();
+  }
+  Chunk chunk = chunk_ref->get();
+  --num_pending_ops_;
+  cv_.SignalAll();
+
+  return chunk;
+}
+
+absl::StatusOr<Chunk> LocalChunkStore::GetByArrivalOrder(
+    int64_t arrival_offset, absl::Duration timeout) {
+  act::MutexLock lock(&mu_);
+  ++num_pending_ops_;
+  absl::StatusOr<std::reference_wrapper<const Chunk>> chunk_ref =
+      GetRefByArrivalOrder_(arrival_offset, timeout);
+  if (!chunk_ref.ok()) {
+    --num_pending_ops_;
+    cv_.SignalAll();
+    return chunk_ref.status();
+  }
+  Chunk chunk = chunk_ref->get();
+  --num_pending_ops_;
+  cv_.SignalAll();
+  return chunk;
+}
+
+absl::StatusOr<std::reference_wrapper<const Chunk>> LocalChunkStore::GetRef_(
+    int64_t seq, absl::Duration timeout) {
   if (chunks_.contains(seq)) {
     const Chunk& chunk = chunks_.at(seq);
     return chunk;
@@ -110,9 +145,8 @@ absl::StatusOr<std::reference_wrapper<const Chunk>> LocalChunkStore::GetRef(
 }
 
 absl::StatusOr<std::reference_wrapper<const Chunk>>
-LocalChunkStore::GetRefByArrivalOrder(int64_t arrival_offset,
-                                      absl::Duration timeout) {
-  act::MutexLock lock(&mu_);
+LocalChunkStore::GetRefByArrivalOrder_(int64_t arrival_offset,
+                                       absl::Duration timeout) {
   if (arrival_order_to_seq_.contains(arrival_offset)) {
     const int64_t seq = arrival_order_to_seq_.at(arrival_offset);
 
