@@ -19,6 +19,7 @@
 
 #include <absl/status/status.h>
 #include <absl/status/statusor.h>
+#include <absl/strings/escaping.h>
 #include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
@@ -107,9 +108,9 @@ absl::StatusOr<py::object> RunThreadsafeIfCoroutine(
 }
 
 static PyObject* MakePyException(PyObject* exception_type,
-                                 absl::string_view message) {
-  return PyObject_CallFunction(exception_type, "s#", message.data(),
-                               static_cast<Py_ssize_t>(message.size()));
+                                 std::string_view message) {
+  std::string escaped = absl::CHexEscape(std::string(message));
+  return PyObject_CallFunction(exception_type, "s", escaped.c_str());
 }
 
 static bool MatchesImportedException(const py::error_already_set& exc,
