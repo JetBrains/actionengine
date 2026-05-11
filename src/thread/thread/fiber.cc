@@ -18,13 +18,13 @@
 #include <boost/fiber/all.hpp>
 #include <boost/fiber/context.hpp>
 #include <boost/intrusive_ptr.hpp>
-#include <latch>
 
 #include "thread/boost_primitives.h"
 #include "thread/select.h"
 #include "thread/thread_pool.h"
 
 namespace thread {
+
 bool IsFiberDetached(const Fiber* absl_nonnull fiber) {
   return ABSL_TS_UNCHECKED_READ(fiber->detached_)
       .load(std::memory_order_relaxed);
@@ -72,7 +72,7 @@ Fiber::Fiber(Unstarted, InvocableWork work, TreeOptions&&)
 void Fiber::Start() {
   EnsureWorkerThreadPool();
 
-  EnsureThreadHasScheduler<boost::fibers::algo::round_robin>();
+  EnsureThreadHasScheduler<InstrumentedRoundRobin>();
   // EnsureThreadHasScheduler<boost::fibers::algo::shared_work>(/*suspend=*/true);
 
   auto body = [this]() {
@@ -274,15 +274,6 @@ void Fiber::Cancel() ABSL_NO_THREAD_SAFETY_ANALYSIS {
     while (true) {
       if (!cancelled) {
         current->cancellation_.Notify();
-        // if (const auto props =
-        //         dynamic_cast<FiberProperties*>(current->properties_);
-        //     ABSL_PREDICT_TRUE(props != nullptr)) {
-        //   // If we have properties, we can wake the CondVar that the fiber
-        //   // is waiting on, if any.
-        //   if (ABSL_PREDICT_FALSE(props->waiting_on_ != nullptr)) {
-        //     props->waiting_on_->SignalAll();
-        //   }
-        // }
       }
 
       class ScopedMutexUnlocker {

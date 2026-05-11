@@ -270,11 +270,6 @@ class AsyncNode(_C.nodes.AsyncNode):
         final: bool = False,
         mimetype: str | None = None,
     ) -> None:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return self.put_sync(obj, seq, final, mimetype)
-
         if isinstance(obj, Chunk):
             if mimetype is not None:
                 raise ValueError(

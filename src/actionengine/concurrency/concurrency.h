@@ -333,6 +333,14 @@ class Future {
 
   Future(Future&& other) noexcept : state_(std::move(other.state_)) {}
 
+  Future& operator=(Future&& other) noexcept {
+    if (this == &other) {
+      return *this;
+    }
+    state_ = std::move(other.state_);
+    return *this;
+  }
+
   absl::Status SetValue(T value) const {
     return state_->SetValue(std::move(value));
   }

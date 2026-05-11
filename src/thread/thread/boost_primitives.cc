@@ -26,6 +26,11 @@
 
 #include "thread/fiber.h"
 
+// Utility for crude debugging. If this duration is infinite, no extra
+// operations are done. If finite, CondVars will emit a stack trace once waited \
+// upon for longer than this duration.
+static constexpr absl::Duration kDiagnosticTimeout = absl::InfiniteDuration();
+
 std::string GetCurrentStackTrace() {
   void* trace[20];
   int trace_size = 0;
@@ -77,11 +82,22 @@ boost::fibers::mutex& Mutex::GetImpl() {
 }
 
 void CondVar::Wait(Mutex* mu) noexcept {
-  thread::FiberProperties* props = thread::GetCurrentFiberProperties();
-
-  if (ABSL_PREDICT_TRUE(props != nullptr)) {
-    MutexLock lock(&props->fiber_->mu_);
-    props->waiting_on_ = this;
+  if constexpr (kDiagnosticTimeout < absl::InfiniteDuration()) {
+    const std::string trace = GetCurrentStackTrace();
+    try {
+      if (cv_.wait_for(mu->GetImpl(),
+                       absl::ToChronoNanoseconds(kDiagnosticTimeout)) ==
+          boost::fibers::cv_status::timeout) {
+        LOG(ERROR) << "\033[91m"
+                   << "WaitWithDeadline() exceeded diagnostic timeout: "
+                   << trace << "\033[0m";
+      } else {
+        return;
+      }
+    } catch (boost::fibers::lock_error& error) {
+      LOG(FATAL) << "Error in underlying implementation: " << error.what();
+      ABSL_ASSUME(false);
+    }
   }
 
   std::string error_message;
@@ -89,14 +105,6 @@ void CondVar::Wait(Mutex* mu) noexcept {
     cv_.wait(mu->GetImpl());
   } catch (boost::fibers::lock_error& error) {
     error_message = error.what();
-  }
-
-  if (ABSL_PREDICT_TRUE(props != nullptr)) {
-    MutexLock lock(&props->fiber_->mu_);
-    CHECK(props->waiting_on_ == this || props->waiting_on_ == nullptr)
-        << "CondVar::Wait() called on a different CondVar than the one we "
-           "waited on. This is a bug in the implementation.";
-    props->waiting_on_ = nullptr;
   }
 
   if (ABSL_PREDICT_FALSE(!error_message.empty())) {
@@ -112,11 +120,26 @@ bool CondVar::WaitWithDeadline(Mutex* mu, const absl::Time& deadline) noexcept {
     return false;
   }
 
-  thread::FiberProperties* props = thread::GetCurrentFiberProperties();
-
-  if (ABSL_PREDICT_TRUE(props != nullptr)) {
-    MutexLock lock(&props->fiber_->mu_);
-    props->waiting_on_ = this;
+  if constexpr (kDiagnosticTimeout < absl::InfiniteDuration()) {
+    if (const absl::Time diagnostic_deadline = absl::Now() + kDiagnosticTimeout;
+        diagnostic_deadline < deadline) {
+      const std::string trace = GetCurrentStackTrace();
+      try {
+        if (cv_.wait_for(
+                mu->GetImpl(),
+                absl::ToChronoNanoseconds(diagnostic_deadline - absl::Now())) ==
+            boost::fibers::cv_status::timeout) {
+          LOG(ERROR) << "\033[91m"
+                     << "WaitWithDeadline() exceeded diagnostic timeout: "
+                     << trace << "\033[0m";
+        } else {
+          return false;
+        }
+      } catch (boost::fibers::lock_error& error) {
+        LOG(FATAL) << "Error in underlying implementation: " << error.what();
+        ABSL_ASSUME(false);
+      }
+    }
   }
 
   bool timed_out = false;
@@ -128,14 +151,6 @@ bool CondVar::WaitWithDeadline(Mutex* mu, const absl::Time& deadline) noexcept {
         boost::fibers::cv_status::timeout;
   } catch (boost::fibers::lock_error& error) {
     error_message = error.what();
-  }
-
-  if (ABSL_PREDICT_TRUE(props != nullptr)) {
-    MutexLock lock(&props->fiber_->mu_);
-    CHECK(props->waiting_on_ == this || props->waiting_on_ == nullptr)
-        << "CondVar::WaitWithDeadline() called on a different CondVar than the "
-           "one we waited on. This is a bug in the implementation.";
-    props->waiting_on_ = nullptr;
   }
 
   if (ABSL_PREDICT_FALSE(!error_message.empty())) {

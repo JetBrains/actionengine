@@ -175,8 +175,6 @@ class FiberProperties final : public boost::fibers::fiber_properties {
 
  private:
   Fiber* absl_nullable fiber_ = nullptr;
-  act::concurrency::impl::CondVar* absl_nullable waiting_on_
-      ABSL_GUARDED_BY(fiber_->mu_) = nullptr;
 };
 
 namespace internal {

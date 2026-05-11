@@ -18,11 +18,74 @@
 #include <atomic>
 #include <thread>
 
+#include <absl/log/check.h>
+#include <boost/context/detail/prefetch.hpp>
 #include <boost/context/pooled_fixedsize_stack.hpp>
 
 #include "thread/boost_primitives.h"
 
 namespace thread {
+
+class InstrumentedRoundRobin : public boost::fibers::algo::algorithm {
+ public:
+  InstrumentedRoundRobin() = default;
+
+  InstrumentedRoundRobin(InstrumentedRoundRobin const&) = delete;
+  InstrumentedRoundRobin& operator=(InstrumentedRoundRobin const&) = delete;
+
+  void awakened(boost::fibers::context* absl_nonnull ctx) noexcept override {
+    CHECK(ctx != nullptr);
+    CHECK(!ctx->ready_is_linked());
+    CHECK(ctx->is_resumable());
+    ctx->ready_link(ready_queue_);
+  }
+
+  boost::fibers::context* absl_nullable pick_next() noexcept override {
+    boost::fibers::context* absl_nullable victim = nullptr;
+    if (!ready_queue_.empty()) {
+      victim = &ready_queue_.front();
+      ready_queue_.pop_front();
+      boost::context::detail::prefetch_range(victim,
+                                             sizeof(boost::fibers::context));
+      CHECK(victim != nullptr);
+      CHECK(!victim->ready_is_linked());
+      CHECK(victim->is_resumable());
+    }
+    return victim;
+  }
+
+  bool has_ready_fibers() const noexcept override {
+    return !ready_queue_.empty();
+  }
+
+  void suspend_until(std::chrono::steady_clock::time_point const&
+                         time_point) noexcept override {
+    std::unique_lock lk{mu_};
+    if (time_point == std::chrono::steady_clock::time_point::max()) {
+      cv_.wait(lk, [&]() { return flag_; });
+      flag_ = false;
+      return;
+    }
+
+    cv_.wait_until(lk, time_point, [&]() { return flag_; });
+    flag_ = false;
+  }
+
+  void notify() noexcept override {
+    std::unique_lock lock(mu_);
+    flag_ = true;
+    // lock.unlock();
+    cv_.notify_all();
+  }
+
+ private:
+  using RQueue = boost::fibers::scheduler::ready_queue_type;
+
+  RQueue ready_queue_{};
+  std::mutex mu_{};
+  std::condition_variable cv_{};
+  bool flag_{false};
+};
 
 template <typename Algo, typename... Args>
 static void EnsureThreadHasScheduler(Args&&... args) {

@@ -160,11 +160,17 @@ ChunkStoreReader::NextNodeFragmentFuture() {
   waiters_.push_back(future.state());
   // If there is something in the buffer already, populate the future now:
   RETURN_IF_ERROR(FanoutBufferToWaiters());
+  if (!status_.ok()) {
+    return status_;
+  }
 
   // If not populated and there are no values to come, set to nullopt.
   if (buffer_->length() == 0 && !loop_started_and_running_ &&
       !future.state()->HasValueOrError()) {
-    RETURN_IF_ERROR(future.SetValue(std::nullopt));
+    mu_.unlock();
+    const absl::Status status = future.SetValue(std::nullopt);
+    mu_.lock();
+    RETURN_IF_ERROR(status);
   }
 
   return future;
@@ -324,7 +330,13 @@ absl::Status ChunkStoreReader::RunPrefetchLoop()
 
     std::pair<int, Chunk> next_seq_and_chunk =
         std::make_pair(next_seq, std::move(next_chunk));
+
+    // It is crucial to unlock the mutex as buffer_ is finite, so readers
+    // should be able to proceed if the maximum number of chunks has been
+    // buffered:
+    mu_.unlock();
     buffer_->writer()->Write(std::move(next_seq_and_chunk));
+    mu_.lock();
 
     if (absl::Status fanout_status = FanoutBufferToWaiters();
         !fanout_status.ok()) {
@@ -335,15 +347,6 @@ absl::Status ChunkStoreReader::RunPrefetchLoop()
 
   buffer_->writer()->Close();
   RETURN_IF_ERROR(FanoutBufferToWaiters());
-
-  // Any waiters left at this point will NOT receive any value; populate them
-  // with errors.
-  while (!waiters_.empty()) {
-    const std::shared_ptr<NodeFragmentFuture::State> waiter = waiters_.front();
-    waiters_.pop_front();
-    waiter->SetError(absl::ResourceExhaustedError("The reader has finished."))
-        .IgnoreError();
-  }
 
   if (thread::Cancelled()) {
     status.Update(absl::CancelledError("Prefetcher fiber was cancelled."));
@@ -393,7 +396,7 @@ absl::Status ChunkStoreReader::FanoutBufferToWaiters() {
       fragment_from_buffer->data = std::move(value_from_buffer->second);
       fragment_from_buffer->continued = final_seq == -1 || seq != final_seq;
     }
- // gracefully indicate that NodeRef is not supported yet
+    // gracefully indicate that NodeRef is not supported yet
     if (fragment_from_buffer &&
         fragment_from_buffer->GetNodeRef().status().ok()) {
       return absl::UnimplementedError(
@@ -477,6 +480,22 @@ void ChunkStoreReader::EnsurePrefetchIsRunningOrHasCompleted()
     act::MutexLock lock(&mu_);
     status_ = RunPrefetchLoop();
     loop_started_and_running_ = false;
+    // Any waiters left at this point will NOT receive any value; populate them
+    // with errors.
+    while (!waiters_.empty()) {
+      const std::shared_ptr<NodeFragmentFuture::State> waiter =
+          waiters_.front();
+      waiters_.pop_front();
+      if (!status_.ok()) {
+        mu_.unlock();
+        waiter->SetError(status_).IgnoreError();
+        mu_.lock();
+        continue;
+      }
+      mu_.unlock();
+      waiter->SetValue(std::nullopt).IgnoreError();
+      mu_.lock();
+    }
     cv_.SignalAll();
   });
 }

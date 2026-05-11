@@ -226,30 +226,26 @@ def make_llm_tool_runner():
 
         tools = make_tools(action.get_registry(), allowed_tools)
 
-        try:
-            async with asyncio.TaskGroup() as tg:
-                # start all tools as soon as possible, but preserve call order
-                tool_call_idx = 0
-                while True:
-                    chunk: data.Chunk | None = await action[
-                        "calls"
-                    ].next_chunk()
-                    if chunk is None:
-                        break
+        async with asyncio.TaskGroup() as tg:
+            # start all tools as soon as possible, but preserve call order
+            tool_call_idx = 0
+            while True:
+                chunk: data.Chunk | None = await action["calls"].next_chunk()
+                if chunk is None:
+                    break
 
-                    tg.create_task(
-                        _run_tool(
-                            tools,
-                            action.get_registry(),
-                            chunk,
-                            action["outputs"],
-                            tool_call_idx,
-                            headers=headers,
-                        )
+                tg.create_task(
+                    _run_tool(
+                        tools,
+                        action.get_registry(),
+                        chunk,
+                        action["outputs"],
+                        tool_call_idx,
+                        headers=headers,
                     )
-                    tool_call_idx += 1
-        finally:
-            await action["outputs"].finalize()
+                )
+                tool_call_idx += 1
+        await action["outputs"].finalize()
 
     return _runner
 

@@ -312,8 +312,8 @@ class LLMTool:
 
         timeout_left = (
             -1.0
-            if timeout == -1.0
-            else timeout - (time.perf_counter() - started_at)
+            if timeout < 0.0
+            else max(0.0, timeout - (time.perf_counter() - started_at))
         )
         await action.wait_until_complete(timeout_left)
 
@@ -340,8 +340,8 @@ class LLMTool:
 
             timeout_left = (
                 -1.0
-                if timeout == -1.0
-                else timeout - (time.perf_counter() - started_at)
+                if timeout < 0.0
+                else max(0.0, timeout - (time.perf_counter() - started_at))
             )
             await LLMTool._read_output(
                 action.get_output(output_name),

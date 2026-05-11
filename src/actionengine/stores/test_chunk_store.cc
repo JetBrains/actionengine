@@ -152,7 +152,6 @@ TEST(ChunkStoreTest, CanReadChunksViaFutures) {
         future->WaitUntil(absl::Now() + absl::Milliseconds(10));
     ASSERT_THAT(seq_and_chunk.status(), IsOk());
     EXPECT_FALSE(seq_and_chunk->has_value());
-    EXPECT_TRUE(std::get<Chunk>((*seq_and_chunk)->data).IsNull());
 
     EXPECT_OK(reader.GetStatus());  // Check that the reader is still OK.
     EXPECT_EQ(read_words, words);

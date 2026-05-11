@@ -85,6 +85,8 @@ void ChunkStoreWriter::SafelyCloseBuffer() {
   }
 }
 
+static constexpr absl::Duration kDiagnosticsInterval = absl::Seconds(120);
+
 absl::Status ChunkStoreWriter::RunWriteLoop() {
   absl::Status status = absl::OkStatus();
 
@@ -93,8 +95,13 @@ absl::Status ChunkStoreWriter::RunWriteLoop() {
     bool buffer_open;
 
     mu_.unlock();
-    thread::Select({buffer_.reader()->OnRead(&next_fragment, &buffer_open),
-                    thread::OnCancel()});
+    if (thread::SelectUntil(
+            absl::Now() + kDiagnosticsInterval,
+            {buffer_.reader()->OnRead(&next_fragment, &buffer_open),
+             thread::OnCancel()}) == -1) {
+      thread::Select({buffer_.reader()->OnRead(&next_fragment, &buffer_open),
+                      thread::OnCancel()});
+    }
     mu_.lock();
 
     if (thread::Cancelled()) {
