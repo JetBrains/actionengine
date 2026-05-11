@@ -19,11 +19,9 @@ import pytest
 
 
 async def run_echo(action: actionengine.Action):
-    print("Running echo", flush=True)
     async for chunk in action["input"]:
         await action["output"].put(chunk)
     await action["output"].finalize()
-    print("Echo complete", flush=True)
 
 
 ECHO_SCHEMA = actionengine.ActionSchema(
@@ -51,10 +49,63 @@ async def test_action_runs():
     received = await echo["output"].consume(allow_none=True)
     assert received == "Hello!"
 
-    print(f"Received: {received}", flush=True)
-
     await echo.wait_until_complete()
-    print("Echo complete outside", flush=True)
+
+
+@pytest.mark.asyncio
+async def test_exceptions_propagate_to_output_nodes():
+    actionengine._C.save_event_loop_globally(asyncio.get_running_loop())
+
+    async def run_failing_echo(action: actionengine.Action):
+        raise RuntimeError("This action failed.")
+
+    failing_echo = (
+        actionengine.Action.from_schema(ECHO_SCHEMA)
+        .bind_handler(run_failing_echo)
+        .run()
+    )
+
+    await failing_echo["input"].put_and_finalize("Hello!")
+    with pytest.raises(RuntimeError, match="This action failed."):
+        await failing_echo["output"].consume()
+
+    with pytest.raises(RuntimeError, match="This action failed."):
+        await failing_echo.wait_until_complete()
+
+
+@pytest.mark.asyncio
+async def test_python_cancellation_works():
+    actionengine._C.save_event_loop_globally(asyncio.get_running_loop())
+
+    side_effect_occurred = False
+
+    async def run_very_long_echo(action: actionengine.Action):
+        nonlocal side_effect_occurred
+
+        await asyncio.sleep(1.0)
+        side_effect_occurred = True
+        await run_echo(action)
+
+    very_long_echo = (
+        actionengine.Action.from_schema(ECHO_SCHEMA)
+        .bind_handler(run_very_long_echo)
+        .run()
+    )
+
+    await very_long_echo["input"].put_and_finalize("Hello!")
+    very_long_echo.cancel()
+    await asyncio.sleep(2.0)
+
+    # propagated as action status
+    with pytest.raises(asyncio.CancelledError):
+        await very_long_echo.wait_until_complete()
+
+    # propagated to output nodes
+    with pytest.raises((asyncio.CancelledError, RuntimeError)):
+        await very_long_echo["output"].consume()
+
+    # makes action stop early
+    assert not side_effect_occurred
 
 
 @pytest.mark.asyncio

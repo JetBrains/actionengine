@@ -65,6 +65,7 @@ target_link_libraries(
         actActionsPybind11 PRIVATE
         absl::flat_hash_map
         absl::log
+        act::util::pybind11
         Boost::json
         ${ACTIONENGINE_PYBIND11_DEPENDENCIES}
 )

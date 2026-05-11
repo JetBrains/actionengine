@@ -27,6 +27,8 @@
 #include <pybind11_abseil/status_caster.h>
 #include <pybind11_abseil/statusor_caster.h>
 
+#include "actionengine/concurrency/concurrency.h"
+
 namespace act::pybindings {
 namespace py = ::pybind11;
 
@@ -60,7 +62,7 @@ void SaveFirstEncounteredEventLoop() {
 }
 
 absl::StatusOr<py::object> RunThreadsafeIfCoroutine(
-    py::object function_call_result, py::object loop, bool return_future) {
+    py::object function_call_result, py::object loop) {
   if (const py::function iscoroutine =
           py::module_::import("inspect").attr("iscoroutine");
       !iscoroutine(function_call_result)) {
@@ -94,16 +96,44 @@ absl::StatusOr<py::object> RunThreadsafeIfCoroutine(
 
   const py::function run_coroutine_threadsafe =
       py::module_::import("asyncio").attr("run_coroutine_threadsafe");
-  const py::object future =
-      run_coroutine_threadsafe(function_call_result, resolved_loop);
-  if (return_future) {
-    return future;
+  return run_coroutine_threadsafe(function_call_result, resolved_loop);
+}
+
+absl::StatusOr<py::object> AwaitConcurrentFuture(py::handle future,
+                                                 absl::Time deadline) {
+  if (future.attr("done")().cast<bool>()) {
+    return future.attr("result")();
+  }
+  auto done = std::make_shared<thread::PermanentEvent>();
+  future.attr("add_done_callback")([done](py::handle) {
+    if (!done->HasBeenNotified()) {
+      done->Notify();
+    }
+  });
+
+  int selected;
+  {
+    py::gil_scoped_release release_gil;
+    selected =
+        thread::SelectUntil(deadline, {thread::OnCancel(), done->OnEvent()});
+  }
+
+  // on deadline or cancellation of this thread, cancel the future
+  if ((selected == 0 || selected == 1) && !future.attr("done")().cast<bool>()) {
+    auto _ = future.attr("cancel")();
+  }
+
+  // by this point, the future is either done or cancelled and must
+  // transition to done.
+  {
+    py::gil_scoped_release release_gil;
+    thread::Select({done->OnEvent()});
   }
 
   try {
     return future.attr("result")();
-  } catch (py::error_already_set& e) {
-    return absl::InternalError(absl::StrCat(e.what()));
+  } catch (const py::error_already_set& exc) {
+    return PyExceptionToStatus(exc);
   }
 }
 

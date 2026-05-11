@@ -52,6 +52,7 @@ target_sources(
 target_link_libraries(
         actServicePybind11 PRIVATE
         act::service
+        act::util::pybind11
         ${ACTIONENGINE_PYBIND11_DEPENDENCIES}
 )
 target_include_directories(

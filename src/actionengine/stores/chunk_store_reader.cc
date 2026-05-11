@@ -393,6 +393,31 @@ absl::Status ChunkStoreReader::FanoutBufferToWaiters() {
       fragment_from_buffer->data = std::move(value_from_buffer->second);
       fragment_from_buffer->continued = final_seq == -1 || seq != final_seq;
     }
+ // gracefully indicate that NodeRef is not supported yet
+    if (fragment_from_buffer &&
+        fragment_from_buffer->GetNodeRef().status().ok()) {
+      return absl::UnimplementedError(
+          "NodeRef support is not implemented yet.");
+    }
+
+    // Resolve futures with errors in case of error statuses
+    if (fragment_from_buffer) {
+      ASSIGN_OR_RETURN(Chunk & chunk, fragment_from_buffer->GetChunk());
+      if (chunk.metadata && chunk.metadata->mimetype == "__status__") {
+        absl::StatusOr<absl::Status> status = ConvertTo<absl::Status>(chunk);
+        if (!status.ok()) {
+          return status.status();
+        }
+        {
+          mu_.unlock();
+          populate_status = waiter->SetError(*status);
+          mu_.lock();
+          RETURN_IF_ERROR(populate_status);
+        }
+        continue;
+      }
+    }
+
     mu_.unlock();
     populate_status = waiter->SetValue(std::move(fragment_from_buffer));
     mu_.lock();

@@ -89,6 +89,8 @@ target_sources(
 target_link_libraries(
         actUtilPybind11 PRIVATE
         ${ACTIONENGINE_PYBIND11_DEPENDENCIES}
+        act::concurrency
+        absl::strings
 )
 target_include_directories(
         actUtilPybind11 PUBLIC

@@ -263,25 +263,40 @@ class AsyncNode(_C.nodes.AsyncNode):
         )
         return self.put_chunk(chunk, seq, final)
 
-    def put(
+    async def put(
         self,
         obj: Any,
         seq: int = -1,
         final: bool = False,
         mimetype: str | None = None,
-    ) -> None | Awaitable[None]:
+    ) -> None:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
             return self.put_sync(obj, seq, final, mimetype)
 
-        return asyncio.to_thread(
-            self.put_sync,
+        if isinstance(obj, Chunk):
+            if mimetype is not None:
+                raise ValueError(
+                    "mimetype must not be specified when putting a Chunk object."
+                )
+            return self.put_chunk(obj, seq, final)
+
+        if isinstance(obj, NodeFragment):
+            if mimetype is not None:
+                raise ValueError(
+                    "mimetype must not be specified when putting a NodeFragment object."
+                )
+            return self.put_fragment(obj, seq)
+
+        chunk = await asyncio.to_thread(
+            data.to_chunk,
             obj,
-            seq,
-            final,
-            mimetype,
+            mimetype=mimetype or "",
+            registry=self._serializer_registry,
         )
+
+        return self.put_chunk(chunk, seq, final)
 
     async def copy_from(self, src: "AsyncNode"):
         """Populates the node with the contents of another node."""
@@ -312,12 +327,8 @@ class AsyncNode(_C.nodes.AsyncNode):
             final=True,
         )
 
-    def finalize(self) -> None | Awaitable[None]:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return self.finalize_sync()
-        return asyncio.to_thread(self.finalize_sync)
+    async def finalize(self):
+        return self.finalize_sync()
 
     # pylint: disable-next=[useless-parent-delegation]
     def get_id(self) -> str:

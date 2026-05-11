@@ -37,6 +37,7 @@
 #include "actionengine/net/stream.h"
 #include "actionengine/stores/chunk_store.h"           // IWYU pragma: keep
 #include "actionengine/stores/chunk_store_pybind11.h"  // IWYU pragma: keep
+#include "actionengine/util/status_macros.h"
 #include "actionengine/util/utils_pybind11.h"
 
 namespace act::pybindings {
@@ -81,13 +82,9 @@ class PyWireStream final : public WireStream {
     }
     const py::object py_result = function(message);
 
-    const absl::StatusOr<py::object> result =
-        pybindings::RunThreadsafeIfCoroutine(py_result);
-
-    if (!result.ok()) {
-      return result.status();
-    }
-    return absl::OkStatus();
+    ASSIGN_OR_RETURN(const py::object future,
+                     pybindings::RunThreadsafeIfCoroutine(py_result));
+    return AwaitConcurrentFuture(future).status();
   }
 
   absl::StatusOr<std::optional<WireMessage>> Receive(
@@ -102,108 +99,113 @@ class PyWireStream final : public WireStream {
     }
     const py::object py_result = function(absl::ToDoubleSeconds(timeout));
 
-    absl::StatusOr<py::object> result =
-        pybindings::RunThreadsafeIfCoroutine(py_result);
+    ASSIGN_OR_RETURN(const py::object future,
+                     pybindings::RunThreadsafeIfCoroutine(py_result));
+    ASSIGN_OR_RETURN(py::object result, AwaitConcurrentFuture(future));
 
-    if (!result.ok()) {
-      return result.status();
-    }
-
-    if (result->is_none()) {
-      return std::nullopt;
-    }
-    return std::move(result)->cast<WireMessage>();
+    return PyCastNoexcept<std::optional<WireMessage>>(std::move(result));
   }
 
   absl::Status Accept() override {
     py::gil_scoped_acquire gil;
-    const py::function function = py::get_override(this, "accept");
+    const py::function accept = py::get_override(this, "accept");
 
-    if (!function) {
+    if (!accept) {
       return absl::UnimplementedError(
           "accept is not implemented in the Python subclass of "
           "WireStream.");
     }
-    try {
-      const py::object py_result = function();
-      const absl::StatusOr<py::object> result =
-          pybindings::RunThreadsafeIfCoroutine(py_result);
 
-      if (!result.ok()) {
-        return result.status();
-      }
+    py::object coro;
+    try {
+      coro = accept();
     } catch (const py::error_already_set& e) {
-      return absl::InternalError(e.what());
+      return PyExceptionToStatus(e);
     }
 
-    return absl::OkStatus();
+    ASSIGN_OR_RETURN(const py::object future, AwaitConcurrentFuture(coro));
+    return AwaitConcurrentFuture(future).status();
   }
 
   absl::Status Start() override {
     py::gil_scoped_acquire gil;
-    const py::function function = py::get_override(this, "start");
+    const py::function start = py::get_override(this, "start");
 
-    if (!function) {
+    if (!start) {
       return absl::UnimplementedError(
           "start is not implemented in the Python subclass of "
           "WireStream.");
     }
+
+    py::object coro;
     try {
-      const py::object py_result = function();
-      const absl::StatusOr<py::object> result =
-          pybindings::RunThreadsafeIfCoroutine(py_result);
-
-      if (!result.ok()) {
-        return result.status();
-      }
+      coro = start();
     } catch (const py::error_already_set& e) {
-      return absl::InternalError(e.what());
+      return PyExceptionToStatus(e);
     }
-
-    return absl::OkStatus();
+    ASSIGN_OR_RETURN(const py::object future, AwaitConcurrentFuture(coro));
+    return AwaitConcurrentFuture(future).status();
   }
 
   void HalfClose() override {
     py::gil_scoped_acquire gil;
-    const py::function function = py::get_override(this, "half_close");
-
-    if (!function) {
+    const py::function half_close = py::get_override(this, "half_close");
+    if (!half_close) {
       LOG(FATAL) << "half_close is not implemented in the Python subclass of "
                     "WireStream.";
       ABSL_ASSUME(false);
     }
-    try {
-      const py::object py_result = function();
-      const absl::StatusOr<py::object> result =
-          pybindings::RunThreadsafeIfCoroutine(py_result);
 
-      if (!result.ok()) {
-        LOG(ERROR) << "Error in half_close: " << result.status();
-      }
+    py::object coro;
+    try {
+      coro = half_close();
     } catch (const py::error_already_set& e) {
-      LOG(ERROR) << "Error in half_close: " << e.what();
+      py::set_error(e.type(), e.value());
+      return;
+    }
+
+    const absl::StatusOr<py::object> future =
+        pybindings::RunThreadsafeIfCoroutine(coro);
+    if (!future.ok()) {
+      LOG(ERROR) << "Error in half_close: " << future.status();
+      return;
+    }
+
+    if (const absl::StatusOr<py::object> result =
+            AwaitConcurrentFuture(*future);
+        !result.ok()) {
+      LOG(ERROR) << "Error in half_close: " << result.status();
+      return;
     }
   }
 
   void Abort(absl::Status status) override {
     py::gil_scoped_acquire gil;
-    const py::function function = py::get_override(this, "abort");
-
-    if (!function) {
+    const py::function abort = py::get_override(this, "abort");
+    if (!abort) {
       LOG(FATAL) << "abort is not implemented in the Python subclass of "
                     "WireStream.";
       ABSL_ASSUME(false);
     }
-    try {
-      const py::object py_result = function();
-      const absl::StatusOr<py::object> result =
-          pybindings::RunThreadsafeIfCoroutine(py_result);
 
-      if (!result.ok()) {
-        LOG(ERROR) << "Error in abort: " << result.status();
-      }
+    py::object coro;
+    try {
+      coro = abort(status);
     } catch (const py::error_already_set& e) {
       LOG(ERROR) << "Error in abort: " << e.what();
+      return;
+    }
+    const absl::StatusOr<py::object> future =
+        pybindings::RunThreadsafeIfCoroutine(coro);
+    if (!future.ok()) {
+      LOG(ERROR) << "Error in abort: " << future.status();
+      return;
+    }
+
+    if (const absl::StatusOr<py::object> result = future.value();
+        !result.ok()) {
+      LOG(ERROR) << "Error in abort: " << result.status();
+      return;
     }
   }
 

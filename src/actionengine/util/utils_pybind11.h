@@ -17,6 +17,7 @@
 
 #include <memory>
 
+#include <absl/log/log.h>
 #include <absl/status/statusor.h>
 #include <pybind11/attr.h>
 #include <pybind11/cast.h>
@@ -126,16 +127,24 @@ struct keep_event_loop_memo {};
  * @param loop
  *  The event loop to run the coroutine in. If not provided or globally set, the
  *  function will try to deduce it from previous library calls.
- * @param return_future
- *   If true, the function will return a Future object that can be used to
- *   wait for the coroutine to complete. If false, the function will return the
- *   coroutine result directly.
  * @return
  *  The result of the coroutine, or the non-coroutine object.
  */
 absl::StatusOr<py::object> RunThreadsafeIfCoroutine(
-    py::object function_call_result, py::object loop = py::none(),
-    bool return_future = false);
+    py::object function_call_result, py::object loop = py::none());
+
+absl::StatusOr<py::object> AwaitConcurrentFuture(
+    py::handle future, absl::Time deadline = absl::InfiniteFuture());
+
+template <typename T>
+absl::StatusOr<T> PyCastNoexcept(const py::object& obj) {
+  try {
+    return py::cast<T>(obj);
+  } catch (const py::cast_error&) {
+    return absl::InvalidArgumentError(
+        "Failed to cast Python object to C++ type");
+  }
+}
 
 PyObject* absl_nonnull StatusToPyException(const absl::Status& status);
 
@@ -165,19 +174,18 @@ absl::Status SetAsyncioFutureResult(py::handle future,
                                     absl::StatusOr<T> value) {
   try {
     future.attr("get_loop")().attr("call_soon_threadsafe")(
-        py::cpp_function([value = std::forward<T>(value),
+        py::cpp_function([value = std::move(value),
                           future = py::cast<py::object>(future)]() mutable {
           if (future.attr("done")().cast<bool>()) {
             future = py::object();
             return;
           }
           if (!value.ok()) {
-            future.attr("set_exception")(
-                StatusToPyException(std::forward<T>(value).status()));
+            future.attr("set_exception")(StatusToPyException(value.status()));
             future = py::object();
             return;
           }
-          future.attr("set_result")(std::forward<T>(value));
+          future.attr("set_result")(*std::move(value));
           future = py::object();
         }));
 

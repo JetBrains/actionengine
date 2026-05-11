@@ -128,7 +128,9 @@ async def _run_tool_calls(
             "output": content,
         }
         if is_error:
-            tool_output["output"] = "ERROR: " + content
+            tool_output["output"] = TextColor.red("ERROR: " + content).replace(
+                "\\n", "\n"
+            )
         tool_outputs.append(tool_output)
         call_idx += 1
 

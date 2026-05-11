@@ -84,28 +84,53 @@ static std::shared_ptr<PyUserData> EnsurePyUserData(
   return user_data;
 }
 
-absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
-  py_handler = py_handler.inc_ref();
+class DestroyUnderGilGuard {
+ public:
+  explicit DestroyUnderGilGuard(py::handle obj) {
+    obj_ = py::cast<py::object>(obj);
+  }
 
+  explicit DestroyUnderGilGuard(py::object obj) { obj_ = std::move(obj); }
+
+  ~DestroyUnderGilGuard() {
+    py::gil_scoped_acquire gil;
+    obj_ = py::object();
+  }
+
+  py::handle Get() { return obj_; }
+
+ private:
+  py::object obj_;
+};
+
+absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
   try {
-    const py::object inspect = py::module::import("inspect");
     if (const bool is_coroutine_function =
-            inspect.attr("iscoroutinefunction")(py_handler).cast<bool>();
+            py::module::import("inspect")
+                .attr("iscoroutinefunction")(py_handler)
+                .cast<bool>();
         !is_coroutine_function) {
       return absl::InvalidArgumentError(
           "Handler must be a coroutine function.");
     }
   } catch (const py::error_already_set& e) {
-    return absl::InternalError(e.what());
+    return PyExceptionToStatus(e);
   }
 
-  return [py_handler](const std::shared_ptr<Action>& action) -> absl::Status {
+  if (py_handler.is_none()) {
+    return absl::InvalidArgumentError("Handler must not be None.");
+  }
+  if (py_handler.ptr() == nullptr) {
+    return absl::InvalidArgumentError("Handler must not be None.");
+  }
+
+  return [py_handler = DestroyUnderGilGuard(py_handler)](
+             const std::shared_ptr<Action>& action) mutable -> absl::Status {
     py::gil_scoped_acquire gil;
     std::shared_ptr<PyUserData> user_data = EnsurePyUserData(action.get());
 
     absl::StatusOr<py::object> concurrent_future_or = RunThreadsafeIfCoroutine(
-        py_handler(action), GetGloballySavedEventLoop(),
-        /*return_future=*/true);
+        py_handler.Get()(action), GetGloballySavedEventLoop());
     if (!concurrent_future_or.ok()) {
       return concurrent_future_or.status();
     }
@@ -116,64 +141,41 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
     // If an action is cancelled from C++ side,
     action->SetOnCancelled([user_data]() {
       py::gil_scoped_acquire gil;
-      auto _ = user_data->concurrent_future.attr("cancel")();
+      auto _ = user_data->asyncio_future.attr("cancel")();
     });
 
     user_data->concurrent_future.attr("add_done_callback")(
-        py::handle(py::cpp_function([user_data](py::handle) {
-          py::gil_scoped_acquire gil;
+        py::cpp_function([user_data](py::handle) {
           if (!user_data->done.HasBeenNotified()) {
             user_data->done.Notify();
           }
-        })));
+        }));
 
     user_data->asyncio_future.attr("add_done_callback")(
-        py::handle(py::cpp_function([user_data](py::handle future) {
-          py::gil_scoped_acquire gil;
+        py::cpp_function([user_data](py::handle future) {
           if (future.attr("cancelled")().cast<bool>()) {
             if (!user_data->concurrent_future.attr("done")().cast<bool>()) {
               auto _ = user_data->concurrent_future.attr("cancel")();
             }
           }
-        })));
+        }));
 
     {
       py::gil_scoped_release release_gil;
       thread::Select({user_data->done.OnEvent()});
     }
 
-    py::object result = py::none();
-    bool error = false;
-    std::string exc_text;
+    absl::StatusOr<py::object> result;
     try {
-      result = user_data->concurrent_future.attr("result")();
+      result.emplace() = user_data->concurrent_future.attr("result")();
     } catch (py::error_already_set& e) {
-      error = true;
-      exc_text = e.what();
+      result.AssignStatus(PyExceptionToStatus(e));
     }
 
-    user_data->asyncio_future.attr("get_loop")().attr("call_soon_threadsafe")(
-        py::cpp_function([result = std::move(result),
-                          exc_text = std::move(exc_text), user_data,
-                          error]() mutable {
-          if (user_data->asyncio_future.attr("done")().cast<bool>()) {
-            result = py::object();
-            return;
-          }
-          if (!error) {
-            user_data->asyncio_future.attr("set_result")(std::move(result));
-          } else {
-            user_data->asyncio_future.attr("set_exception")(
-                PyObject_CallFunction(PyExc_RuntimeError, "s",
-                                      exc_text.c_str()));
-          }
-          result = py::object();
-        }));
-
-    if (error) {
-      return absl::InternalError(absl::StrCat(exc_text));
-    }
-    return absl::OkStatus();
+    absl::Status raw_status = result.status();
+    RETURN_IF_ERROR(
+        SetAsyncioFutureResult(user_data->asyncio_future, std::move(result)));
+    return raw_status;
   };
 }
 
@@ -607,8 +609,7 @@ void BindAction(py::handle scope, std::string_view name) {
             RETURN_IF_ERROR(action->RunInBackground(/*detach=*/true));
             return action;
           },
-          pybindings::keep_event_loop_memo(),
-          py::call_guard<py::gil_scoped_release>())
+          pybindings::keep_event_loop_memo())
       .def(
           "call",
           [](const std::shared_ptr<Action>& action, py::handle headers_obj) {
@@ -682,7 +683,6 @@ void BindAction(py::handle scope, std::string_view name) {
       .def("cancel",
            [](const std::shared_ptr<Action>& self) {
              const auto user_data = EnsurePyUserData(self.get());
-             auto _ = user_data->asyncio_future.attr("cancel")();
              py::gil_scoped_release release_gil;
              return self->Cancel();
            })
@@ -753,7 +753,7 @@ void BindAction(py::handle scope, std::string_view name) {
           [](const std::shared_ptr<Action>& self,
              py::function handler) -> absl::Status {
             ASSIGN_OR_RETURN(auto cpp_handler,
-                             MakeSimpleActionHandler(std::move(handler)));
+                             MakeSimpleActionHandler(handler));
             self->set_handler(std::move(cpp_handler));
             return absl::OkStatus();
           },

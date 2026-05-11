@@ -260,7 +260,10 @@ async def generate_content_claude(
                     tool_output_display = (
                         ""
                         if not is_error
-                        else ("ERROR: " + output.get("error", ""))
+                        else TextColor.red(
+                            "ERROR: "
+                            + output.get("error", "").replace("\\n", "\n")
+                        )
                     )
                     if not tool_output_display:
                         if tool_calls[call_idx]["name"] == "sqlite_select":
