@@ -90,6 +90,36 @@ class DestroyUnderGilGuard {
     obj_ = py::cast<py::object>(obj);
   }
 
+  DestroyUnderGilGuard(const DestroyUnderGilGuard& other) {
+    py::gil_scoped_acquire gil;
+    obj_ = other.obj_;
+  }
+
+  DestroyUnderGilGuard(DestroyUnderGilGuard&& other) noexcept {
+    py::gil_scoped_acquire gil;
+    obj_ = std::move(other.obj_);
+    other.obj_ = py::object();
+  }
+
+  DestroyUnderGilGuard& operator=(const DestroyUnderGilGuard& other) {
+    py::gil_scoped_acquire gil;
+    if (this == &other) {
+      return *this;
+    }
+    obj_ = other.obj_;
+    return *this;
+  }
+
+  DestroyUnderGilGuard& operator=(DestroyUnderGilGuard&& other) noexcept {
+    py::gil_scoped_acquire gil;
+    if (this == &other) {
+      return *this;
+    }
+    obj_ = std::move(other.obj_);
+    other.obj_ = py::object();
+    return *this;
+  }
+
   explicit DestroyUnderGilGuard(py::object obj) { obj_ = std::move(obj); }
 
   ~DestroyUnderGilGuard() {
@@ -97,7 +127,7 @@ class DestroyUnderGilGuard {
     obj_ = py::object();
   }
 
-  py::handle Get() { return obj_; }
+  py::handle Get() const { return obj_; }
 
  private:
   py::object obj_;
@@ -170,6 +200,9 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
       result.emplace() = user_data->concurrent_future.attr("result")();
     } catch (py::error_already_set& e) {
       result.AssignStatus(PyExceptionToStatus(e));
+      DLOG(ERROR) << "[" << action->schema().name << " " << action->id()
+                  << "] ended with an exception: \033[91m" << result.status()
+                  << "\033[0m";
     }
 
     absl::Status raw_status = result.status();
@@ -322,8 +355,11 @@ void BindActionPortSchema(py::handle scope, std::string_view name) {
 
 void BindActionSchema(py::handle scope, std::string_view name) {
   py::class_<ActionSchema>(scope, std::string(name).c_str())
-      .def(py::init<>())
-      // .def(MakeSameObjectRefConstructor<ActionSchema>())
+      .def(py::init([]() {
+        ActionSchema schema;
+        schema.user_data = std::make_shared<DestroyUnderGilGuard>(py::dict());
+        return schema;
+      }))
       .def(py::init([](std::string_view action_name,
                        const std::vector<ActionPortSchema>& inputs,
                        const std::vector<ActionPortSchema>& outputs,
@@ -338,9 +374,14 @@ void BindActionSchema(py::handle scope, std::string_view name) {
              for (const auto& port : outputs) {
                output_ports[port.name] = port;
              }
-             return ActionSchema(
+             auto schema = ActionSchema(
                  std::string(action_name), std::move(input_ports),
                  std::move(output_ports), std::string(description));
+             if (schema.user_data == nullptr) {
+               schema.user_data =
+                   std::make_shared<DestroyUnderGilGuard>(py::dict());
+             }
+             return schema;
            }),
            py::kw_only(), py::arg("name"), py::arg_v("inputs", py::none()),
            py::arg_v("outputs", py::none()), py::arg_v("description", ""))
@@ -392,15 +433,12 @@ void BindActionSchema(py::handle scope, std::string_view name) {
           "set_python_type_for_port",
           [](ActionSchema& self, std::string_view port, py::type type) {
             if (self.user_data == nullptr) {
-              self.user_data = std::shared_ptr<py::dict>(
-                  new py::dict, [](const py::dict* dict) {
-                    py::gil_scoped_acquire gil;
-                    delete dict;
-                  });
+              self.user_data =
+                  std::make_shared<DestroyUnderGilGuard>(py::dict());
             }
-            const std::shared_ptr<py::dict> dict =
-                std::static_pointer_cast<py::dict>(self.user_data);
-            (*dict)[py::str(std::string(port))] = type;
+            const DestroyUnderGilGuard* dict =
+                static_cast<DestroyUnderGilGuard*>(self.user_data.get());
+            dict->Get()[py::str(std::string(port))] = type;
           },
           py::arg("port"), py::arg("type"))
       .def("get_python_type_for_port",
@@ -408,10 +446,10 @@ void BindActionSchema(py::handle scope, std::string_view name) {
              if (self.user_data == nullptr) {
                return py::none();
              }
-             const std::shared_ptr<py::dict> dict =
-                 std::static_pointer_cast<py::dict>(self.user_data);
-             if (dict->contains(py::str(std::string(port)))) {
-               return (*dict)[py::str(std::string(port))];
+             const DestroyUnderGilGuard* dict =
+                 static_cast<DestroyUnderGilGuard*>(self.user_data.get());
+             if (dict->Get().contains(py::str(std::string(port)))) {
+               return dict->Get()[py::str(std::string(port))];
              }
              return py::none();
            })
@@ -515,7 +553,7 @@ void BindActionRegistry(py::handle scope, std::string_view name) {
       .def(
           "register",
           [](const std::shared_ptr<ActionRegistry>& self, std::string_view name,
-             const ActionSchema& def, py::function handler) -> absl::Status {
+             const ActionSchema& def, py::handle handler) -> absl::Status {
             ASSIGN_OR_RETURN(ActionHandler cpp_handler,
                              MakeSimpleActionHandler(handler));
             self->Register(name, def, std::move(cpp_handler));
@@ -600,8 +638,7 @@ void BindAction(py::handle scope, std::string_view name) {
            RETURN_IF_ERROR(action->Run(timeout_duration));
            return action;
          },
-         pybindings::keep_event_loop_memo(),
-         py::call_guard<py::gil_scoped_release>())
+         pybindings::keep_event_loop_memo())
       .def(
           "run_in_background",
           [](const std::shared_ptr<Action>& action)

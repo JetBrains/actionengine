@@ -161,3 +161,4 @@ async def generate_content(action: Action):
         tg.create_task(generate["tools"].copy_from(action["tools"]))
 
     await generate.wait_until_complete()
+    logger.info("finished.")

@@ -95,6 +95,9 @@ class ActionSchema(_C.actions.ActionSchema):
         input_ports = []
         output_ports = []
 
+        input_type_map = dict()
+        output_type_map = dict()
+
         for input_tuple in inputs:
             if len(input_tuple) == 2:
                 input_name, input_type = input_tuple
@@ -102,7 +105,7 @@ class ActionSchema(_C.actions.ActionSchema):
             else:
                 input_name, input_type, input_desc = input_tuple
             if isinstance(input_type, type):
-                self.set_python_type_for_port(input_name, input_type)
+                input_type_map[input_name] = input_type
             if isinstance(input_type, type) and issubclass(
                 input_type, BaseModel
             ):
@@ -119,7 +122,7 @@ class ActionSchema(_C.actions.ActionSchema):
                 output_name, output_type, output_desc = output_tuple
 
             if isinstance(output_type, type):
-                self.set_python_type_for_port(output_name, output_type)
+                output_type_map[output_name] = output_type
             if isinstance(output_type, type) and issubclass(
                 output_type, BaseModel
             ):
@@ -134,6 +137,13 @@ class ActionSchema(_C.actions.ActionSchema):
             outputs=output_ports,
             description=description,
         )
+
+        # set_python_type_for_port requires the object to be initialised, therefore
+        # these are deferred until after __init__
+        for input_name, input_type in input_type_map.items():
+            self.set_python_type_for_port(input_name, input_type)
+        for output_name, output_type in output_type_map.items():
+            self.set_python_type_for_port(output_name, output_type)
 
     def get_python_type_for_port(self, name: str):
         return super().get_python_type_for_port(name)

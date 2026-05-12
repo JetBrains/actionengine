@@ -136,7 +136,7 @@ struct ActionSchema {
   absl::flat_hash_map<std::string, std::string> output_to_json_field;
   absl::flat_hash_map<std::string, ActionHeaderSchema> headers;
 
-  std::shared_ptr<void> user_data;
+  std::shared_ptr<void> user_data{nullptr};
 };
 
 constexpr std::string_view kListActionsDescription =

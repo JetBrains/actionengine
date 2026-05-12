@@ -41,6 +41,7 @@ double kDelayBetweenWords = 0.1;
 
 // Simply some type aliases to make the code more readable.
 using Action = act::Action;
+using ActionPortSchema = act::ActionPortSchema;
 using ActionRegistry = act::ActionRegistry;
 using Chunk = act::Chunk;
 using Service = act::Service;
@@ -98,23 +99,25 @@ absl::Status RunBidiEcho(const std::shared_ptr<Action>& action) {
 ActionRegistry MakeActionRegistry() {
   ActionRegistry registry;
 
-  registry.Register(/*name=*/"bidi_echo",
-                    /*schema=*/
-                    {
-                        .name = "bidi_echo",
-                        .inputs = {{"text", "text/plain"}},
-                        .outputs = {},
-                    },
-                    /*handler=*/RunBidiEcho);
+  registry.Register(
+      /*name=*/"bidi_echo",
+      /*schema=*/
+      {
+          .name = "bidi_echo",
+          .inputs = {{"text", ActionPortSchema("text", "text/plain")}},
+          .outputs = {},
+      },
+      /*handler=*/RunBidiEcho);
 
-  registry.Register(/*name=*/"print_text",
-                    /*schema=*/
-                    {
-                        .name = "print_text",
-                        .inputs = {{"text", "text/plain"}},
-                        .outputs = {},
-                    },
-                    /*handler=*/RunPrint);
+  registry.Register(
+      /*name=*/"print_text",
+      /*schema=*/
+      {
+          .name = "print_text",
+          .inputs = {{"text", ActionPortSchema("text", "text/plain")}},
+          .outputs = {},
+      },
+      /*handler=*/RunPrint);
   return registry;
 }
 

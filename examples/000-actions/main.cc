@@ -32,6 +32,7 @@ ABSL_FLAG(uint16_t, port, 20000, "Port to try to bind the WebRTC server to.");
 
 // Simply some type aliases to make the code more readable.
 using Action = act::Action;
+using ActionPortSchema = act::ActionPortSchema;
 using ActionRegistry = act::ActionRegistry;
 using Chunk = act::Chunk;
 using Service = act::Service;
@@ -116,14 +117,15 @@ ActionRegistry MakeActionRegistry() {
   // that takes a shared_ptr to the Action object as an argument and implements
   // the action logic. There must be no two nodes with the same name within the
   // same action, even if they are an input and an output.
-  registry.Register(/*name=*/"echo",
-                    /*schema=*/
-                    {
-                        .name = "echo",
-                        .inputs = {{"text", "text/plain"}},
-                        .outputs = {{"response", "text/plain"}},
-                    },
-                    /*handler=*/RunEcho);
+  registry.Register(
+      /*name=*/"echo",
+      /*schema=*/
+      {
+          .name = "echo",
+          .inputs = {{"text", ActionPortSchema("text", "text/plain")}},
+          .outputs = {{"response", ActionPortSchema("response", "text/plain")}},
+      },
+      /*handler=*/RunEcho);
   return registry;
 }
 

@@ -23,6 +23,8 @@ ABSL_FLAG(std::string, identity, "echo-server-1",
 
 // Simply some type aliases to make the code more readable.
 using Action = act::Action;
+using ActionSchema = act::ActionSchema;
+using ActionPortSchema = act::ActionPortSchema;
 using ActionRegistry = act::ActionRegistry;
 using Chunk = act::Chunk;
 using Service = act::Service;
@@ -55,14 +57,16 @@ absl::Status RunEcho(const std::shared_ptr<Action>& action) {
 ActionRegistry MakeActionRegistry() {
   ActionRegistry registry;
 
-  registry.Register(/*name=*/"echo",
-                    /*schema=*/
-                    {
-                        .name = "echo",
-                        .inputs = {{"text", "text/plain"}},
-                        .outputs = {{"response", "text/plain"}},
-                    },
-                    /*handler=*/RunEcho);
+  registry.Register(
+      /*name=*/"echo",
+      /*schema=*/
+      {.name = "echo",
+       .inputs = {{"text", ActionPortSchema("text", "text/plain")}},
+       .outputs = {{"response", ActionPortSchema("response", "text/plain")}},
+       .description = "Echoes the input."}
+
+      ,
+      /*handler=*/RunEcho);
   return registry;
 }
 
