@@ -709,7 +709,8 @@ void ActionExecutionContext::CommunicateHandlerStatus_(
         node->Put(absl::OutOfRangeError(
                       absl::StrCat("The action has completed successfully, but "
                                    "did not finalise this output node: ",
-                                   output_name)))
+                                   output_name)),
+                  -1, true)
             .IgnoreError();
       }
       writer.FlushCurrentBuffer();
@@ -751,7 +752,7 @@ void ActionExecutionContext::CommunicateHandlerStatus_(
         stream != nullptr) {
       writer.BindPeers({{stream->GetId(), stream}});
     }
-    if (!node->Put(status).ok()) {
+    if (!node->Put(status, -1, true).ok()) {
       DLOG(WARNING) << "Failed to send action status to __status__ node.";
     }
     writer.FlushCurrentBuffer();
@@ -846,11 +847,6 @@ absl::Status Action::Call(
         "Cannot call action: it has already been run.");
   }
 
-  if (bound_resources_.stream() == nullptr) {
-    return absl::FailedPreconditionError(
-        "Cannot call action: no wire stream is bound to the action.");
-  }
-
   if (Session* absl_nullable session = bound_resources_.session();
       session != nullptr) {
     if (!weak_from_this().lock()) {
@@ -881,9 +877,11 @@ absl::Status Action::Call(
     if (Session* session = bound_resources_.session(); session != nullptr) {
       RETURN_IF_ERROR(session->RecordActionCall(id_, shared_from_this()));
     }
-    RETURN_IF_ERROR(bound_resources_.stream()->Send(
-        WireMessage{.actions = {std::move(message)},
-                    .headers = std::move(wire_message_headers)}));
+    if (bound_resources_.stream() != nullptr) {
+      RETURN_IF_ERROR(bound_resources_.stream()->Send(
+          WireMessage{.actions = {std::move(message)},
+                      .headers = std::move(wire_message_headers)}));
+    }
   }
 
   RETURN_IF_ERROR(ctx_.RecordCall(ActionCallState{}));

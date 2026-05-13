@@ -699,6 +699,14 @@ void BindAction(py::handle scope, std::string_view name) {
             return *dispatch_status_or;
           },
           py::arg("headers") = py::none())
+      .def("has_been_called",
+           [](const std::shared_ptr<Action>& action) {
+             return action->HasBeenCalled();
+           })
+      .def("has_been_run",
+           [](const std::shared_ptr<Action>& action) {
+             return action->HasBeenRun();
+           })
       .def("get_future",
            [](const std::shared_ptr<Action>& action) {
              const std::shared_ptr<PyUserData> user_data =

@@ -51,6 +51,8 @@ ActionRegistry::ActionRegistry() {
                  boost::json::object input_obj;
                  input_obj["name"] = boost::json::string(input_port.name);
                  input_obj["type"] = boost::json::string(input_port.type);
+                 input_obj["description"] =
+                     boost::json::string(input_port.description);
                  inputs_obj.push_back(std::move(input_obj));
                }
                schema_obj["inputs"] = std::move(inputs_obj);
@@ -60,6 +62,8 @@ ActionRegistry::ActionRegistry() {
                  boost::json::object output_obj;
                  output_obj["name"] = boost::json::string(output_port.name);
                  output_obj["type"] = boost::json::string(output_port.type);
+                 output_obj["description"] =
+                     boost::json::string(output_port.description);
                  outputs_obj.push_back(std::move(output_obj));
                }
                schema_obj["outputs"] = std::move(outputs_obj);

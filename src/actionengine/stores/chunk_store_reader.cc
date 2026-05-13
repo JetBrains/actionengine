@@ -409,11 +409,17 @@ absl::Status ChunkStoreReader::FanoutBufferToWaiters() {
       if (chunk.metadata && chunk.metadata->mimetype == "__status__") {
         absl::StatusOr<absl::Status> status = ConvertTo<absl::Status>(chunk);
         if (!status.ok()) {
+          {
+            mu_.unlock();
+            populate_status = waiter->SetError(status.status());
+            mu_.lock();
+            RETURN_IF_ERROR(populate_status);
+          }
           return status.status();
         }
         {
           mu_.unlock();
-          populate_status = waiter->SetError(*status);
+          populate_status = waiter->SetValue(std::move(fragment_from_buffer));
           mu_.lock();
           RETURN_IF_ERROR(populate_status);
         }

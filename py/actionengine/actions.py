@@ -247,10 +247,16 @@ class Action(_C.actions.Action):
 
     async def wait_until_complete(self, timeout: float = -1.0):
         """Waits for the action to complete with an optional timeout."""
-        future = _C.actions.Action.get_future(self)
-        if future is None:
-            raise RuntimeError("Action Future is not set.")
-        await asyncio.wait_for(future, timeout if timeout >= 0 else None)
+        if self.has_been_run():
+            future = _C.actions.Action.get_future(self)
+            if future is None:
+                raise RuntimeError("Action Future is not set.")
+            await asyncio.wait_for(future, timeout if timeout >= 0 else None)
+
+        if self.has_been_called():
+            status_node: AsyncNode
+            status_node = self.get_output("__status__")
+            await status_node.consume()
 
     async def call(
         self, wire_message_headers: dict[str, bytes] | None = None
