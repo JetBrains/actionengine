@@ -118,6 +118,12 @@ def msgpack_bytes_to_dict(value: bytes) -> dict:
     return ormsgpack.unpackb(value)
 
 
+def register_ae_struct_serializers(registry: SerializerRegistry, cls: type):
+    mimetype = f"application/x-actionengine;struct:{cls.__name__}"
+    registry.register_serializer(mimetype, lambda obj: obj.pack_msgpack(), cls)
+    registry.register_deserializer(mimetype, cls.from_msgpack, cls)
+
+
 _DEFAULT_SERIALIZERS_REGISTERED = False
 
 
@@ -154,10 +160,17 @@ def _register_default_serializers():
     registry.register_serializer(
         "__BaseModel__", pydantic_helpers.base_model_to_bytes, BaseModel
     )
-
     registry.register_deserializer(
         "__BaseModel__", pydantic_helpers.bytes_to_base_model, BaseModel
     )
+
+    register_ae_struct_serializers(registry, _C.data.ChunkMetadata)
+    register_ae_struct_serializers(registry, _C.data.Chunk)
+    register_ae_struct_serializers(registry, _C.data.NodeRef)
+    register_ae_struct_serializers(registry, _C.data.NodeFragment)
+    register_ae_struct_serializers(registry, _C.data.Port)
+    register_ae_struct_serializers(registry, _C.data.ActionMessage)
+    register_ae_struct_serializers(registry, _C.data.WireMessage)
 
     _DEFAULT_SERIALIZERS_REGISTERED = True
 

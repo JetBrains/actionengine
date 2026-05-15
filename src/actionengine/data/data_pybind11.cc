@@ -209,6 +209,21 @@ void BindChunkMetadata(py::handle scope, std::string_view name) {
              metadata.attributes[key] =
                  std::string(value.attr("encode")("utf-8").cast<std::string>());
            })
+      .def("pack_msgpack",
+           [](const ChunkMetadata& meta) {
+             const std::vector<uint8_t> bytes = cppack::Pack(meta);
+             return py::bytes(reinterpret_cast<const char*>(bytes.data()),
+                              bytes.size());
+           })
+      .def_static(
+          "from_msgpack",
+          [](const py::bytes& data) -> absl::StatusOr<ChunkMetadata> {
+            const auto data_str = static_cast<std::string>(data);
+            const std::vector<uint8_t> data_bytes(data_str.begin(),
+                                                  data_str.end());
+            return cppack::Unpack<ChunkMetadata>(data_bytes);
+          },
+          py::arg("data"))
       .def("__eq__", [](const ChunkMetadata& lhs,
                         const ChunkMetadata& rhs) { return lhs == rhs; })
       .def("__repr__",
@@ -270,6 +285,21 @@ void BindChunk(py::handle scope, std::string_view name) {
                                            /*registry=*/nullptr);
           },
           py::arg_v("mimetype", ""), keep_event_loop_memo())
+      .def("pack_msgpack",
+           [](const Chunk& chunk) {
+             const std::vector<uint8_t> bytes = cppack::Pack(chunk);
+             return py::bytes(reinterpret_cast<const char*>(bytes.data()),
+                              bytes.size());
+           })
+      .def_static(
+          "from_msgpack",
+          [](const py::bytes& data) -> absl::StatusOr<Chunk> {
+            const auto data_str = static_cast<std::string>(data);
+            const std::vector<uint8_t> data_bytes(data_str.begin(),
+                                                  data_str.end());
+            return cppack::Unpack<Chunk>(data_bytes);
+          },
+          py::arg("data"))
       .def("__eq__",
            [](const Chunk& lhs, const Chunk& rhs) { return lhs == rhs; })
       .def("__repr__", [](const Chunk& chunk) { return absl::StrCat(chunk); })
@@ -294,6 +324,21 @@ void BindNodeRef(py::handle scope, std::string_view name) {
       .def_readwrite("id", &NodeRef::id)
       .def_readwrite("offset", &NodeRef::offset)
       .def_readwrite("length", &NodeRef::length)
+      .def("pack_msgpack",
+           [](const NodeRef& ref) {
+             const std::vector<uint8_t> bytes = cppack::Pack(ref);
+             return py::bytes(reinterpret_cast<const char*>(bytes.data()),
+                              bytes.size());
+           })
+      .def_static(
+          "from_msgpack",
+          [](const py::bytes& data) -> absl::StatusOr<NodeRef> {
+            const auto data_str = static_cast<std::string>(data);
+            const std::vector<uint8_t> data_bytes(data_str.begin(),
+                                                  data_str.end());
+            return cppack::Unpack<NodeRef>(data_bytes);
+          },
+          py::arg("data"))
       .def("__eq__",
            [](const NodeRef& lhs, const NodeRef& rhs) { return lhs == rhs; })
       .def("__repr__",
@@ -333,6 +378,21 @@ void BindNodeFragment(py::handle scope, std::string_view name) {
           })
       .def_readwrite("seq", &NodeFragment::seq)
       .def_readwrite("continued", &NodeFragment::continued)
+      .def("pack_msgpack",
+           [](const NodeFragment& fragment) {
+             const std::vector<uint8_t> bytes = cppack::Pack(fragment);
+             return py::bytes(reinterpret_cast<const char*>(bytes.data()),
+                              bytes.size());
+           })
+      .def_static(
+          "from_msgpack",
+          [](const py::bytes& data) -> absl::StatusOr<NodeFragment> {
+            const auto data_str = static_cast<std::string>(data);
+            const std::vector<uint8_t> data_bytes(data_str.begin(),
+                                                  data_str.end());
+            return cppack::Unpack<NodeFragment>(data_bytes);
+          },
+          py::arg("data"))
       .def("__eq__", [](const NodeFragment& lhs,
                         const NodeFragment& rhs) { return lhs == rhs; })
       .def("__repr__",
@@ -352,6 +412,21 @@ void BindPort(py::handle scope, std::string_view name) {
            py::kw_only(), py::arg_v("name", ""), py::arg_v("id", ""))
       .def_readwrite("name", &Port::name)
       .def_readwrite("id", &Port::id)
+      .def("pack_msgpack",
+           [](const Port& port) {
+             const std::vector<uint8_t> bytes = cppack::Pack(port);
+             return py::bytes(reinterpret_cast<const char*>(bytes.data()),
+                              bytes.size());
+           })
+      .def_static(
+          "from_msgpack",
+          [](const py::bytes& data) -> absl::StatusOr<Port> {
+            const auto data_str = static_cast<std::string>(data);
+            const std::vector<uint8_t> data_bytes(data_str.begin(),
+                                                  data_str.end());
+            return cppack::Unpack<Port>(data_bytes);
+          },
+          py::arg("data"))
       .def("__eq__",
            [](const Port& lhs, const Port& rhs) { return lhs == rhs; })
       .def("__repr__",
@@ -437,6 +512,21 @@ void BindActionMessage(py::handle scope, std::string_view name) {
             self.headers.erase(key);
           },
           py::arg("key"))
+      .def("pack_msgpack",
+           [](const ActionMessage& message) {
+             const std::vector<uint8_t> bytes = cppack::Pack(message);
+             return py::bytes(reinterpret_cast<const char*>(bytes.data()),
+                              bytes.size());
+           })
+      .def_static(
+          "from_msgpack",
+          [](const py::bytes& data) -> absl::StatusOr<ActionMessage> {
+            const auto data_str = static_cast<std::string>(data);
+            const std::vector<uint8_t> data_bytes(data_str.begin(),
+                                                  data_str.end());
+            return cppack::Unpack<ActionMessage>(data_bytes);
+          },
+          py::arg("data"))
       .def("__eq__", [](const ActionMessage& lhs,
                         const ActionMessage& rhs) { return lhs == rhs; })
       .def("__repr__",
@@ -529,7 +619,7 @@ void BindWireMessage(py::handle scope, std::string_view name) {
       .def_static(
           "from_msgpack",
           [](const py::bytes& data) -> absl::StatusOr<WireMessage> {
-            const std::string data_str = static_cast<std::string>(data);
+            const auto data_str = static_cast<std::string>(data);
             const std::vector<uint8_t> data_bytes(data_str.begin(),
                                                   data_str.end());
             return cppack::Unpack<WireMessage>(data_bytes);
