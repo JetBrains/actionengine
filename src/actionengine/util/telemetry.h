@@ -61,10 +61,12 @@ std::string GetTelemetryHeaderName(std::string_view name);
 opentelemetry::trace::SpanId GenerateSpanId();
 opentelemetry::trace::TraceId GenerateTraceId();
 
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
+absl::StatusOr<
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>>
 GetHttpTracerProvider(
     std::string_view url =
-        "https://langfuse.databao.dev/api/public/otel/v1/traces");
+        "https://langfuse.databao.dev/api/public/otel/v1/traces",
+    std::string_view auth_header = "");
 
 void SetGlobalTracerProvider();
 void SetGlobalTracerProvider(

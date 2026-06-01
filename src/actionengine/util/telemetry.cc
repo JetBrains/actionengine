@@ -72,17 +72,17 @@ opentelemetry::trace::TraceId GenerateTraceId() {
   return GetIdGenerator().GenerateTraceId();
 }
 
-opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
-GetHttpTracerProvider(std::string_view url) {
+absl::StatusOr<
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>>
+GetHttpTracerProvider(std::string_view url, std::string_view auth_header) {
+  if (auth_header.empty()) {
+    return absl::InvalidArgumentError("Authorization header missing.");
+  }
   trace_sdk::BatchSpanProcessorOptions batch_processor_opts{};
   opentelemetry::exporter::otlp::OtlpHttpExporterOptions opts;
   opts.url = url;
-  std::string auth = absl::StrCat(
-      "Basic ", absl::Base64Escape(absl::StrCat(
-                    "pk-lf-cc1a3156-b414-4fd3-a74a-63947d9c0c4c", ":",
-                    "sk-lf-a256e422-f842-4933-abe5-a390f48ac9e0")));
   opts.http_headers.emplace(
-      std::pair{std::string("Authorization"), std::move(auth)});
+      std::pair{std::string("Authorization"), std::string(auth_header)});
   auto exporter =
       opentelemetry::exporter::otlp::OtlpHttpExporterFactory::Create(opts);
   auto processor = trace_sdk::BatchSpanProcessorFactory::Create(
