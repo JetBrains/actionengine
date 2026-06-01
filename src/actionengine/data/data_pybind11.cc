@@ -245,6 +245,7 @@ void BindChunk(py::handle scope, std::string_view name) {
            }),
            py::kw_only(), py::arg_v("metadata", ChunkMetadata()),
            py::arg_v("data", py::bytes()), py::arg_v("ref", ""))
+      .def("is_null", &Chunk::IsNull)
       .def_readwrite("metadata", &Chunk::metadata)
       .def_readwrite("ref", &Chunk::ref)
       .def_property(
@@ -502,7 +503,7 @@ void BindActionMessage(py::handle scope, std::string_view name) {
             }
             std::string value = std::string(py_value_bytes);
 
-            self.headers[key] = std::move(value);
+            self.SetHeader(key, std::move(value));
             return absl::OkStatus();
           },
           py::arg("key"), py::arg("value"))
@@ -600,7 +601,7 @@ void BindWireMessage(py::handle scope, std::string_view name) {
             }
             std::string value = std::string(py_value_bytes);
 
-            self.headers[key] = std::move(value);
+            self.SetHeader(key, std::move(value));
             return absl::OkStatus();
           },
           py::arg("key"), py::arg("value"))
@@ -766,6 +767,13 @@ py::module_ MakeDataModule(py::module_ scope, std::string_view module_name) {
   data.def("get_global_serializer_registry", []() {
     return ShareWithNoDeleter(GetGlobalSerializerRegistryPtr());
   });
+
+  data.def(
+      "make_scoped_header_key",
+      [](std::string_view key) -> std::string {
+        return MakeScopedHeaderKey(key);
+      },
+      py::arg("key"));
 
   data.def(
       "to_bytes",

@@ -12,5 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import enum
+
 from . import generate_content
 from . import generate_content_handler
+
+from actionengine import data
+
+make_scoped_header_key = data.make_scoped_header_key
+
+
+class LLMHeaders(enum.StrEnum):
+    ALLOWED_TOOLS = make_scoped_header_key("llm-allowed-tools")
+    PROVIDER = make_scoped_header_key("llm-provider")
+    MODEL = make_scoped_header_key("llm-model")
+    EXTRA_CONFIG = make_scoped_header_key("llm-extra-config")
+    API_KEY = make_scoped_header_key("llm-api-key")

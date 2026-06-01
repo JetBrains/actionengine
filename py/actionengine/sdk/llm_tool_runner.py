@@ -20,6 +20,7 @@ from actionengine import async_node
 from actionengine import data
 from actionengine.logging import get_logger
 from actionengine.sdk import llm_tool
+from actionengine.sdk.llm import LLMHeaders
 
 _LOGGER = get_logger()
 
@@ -34,7 +35,7 @@ def set_allowed_tools(action: actions.Action, tool_names: Sequence[str]):
     :param tool_names: A list of allowed tool names.
     """
     tool_names = [tool.strip() for tool in tool_names]
-    action.set_header(llm_tool.ALLOWED_TOOLS_HEADER, ",".join(tool_names))
+    action.set_header(LLMHeaders.ALLOWED_TOOLS, ",".join(tool_names))
 
 
 def get_allowed_tools(
@@ -47,7 +48,7 @@ def get_allowed_tools(
     :return: A list of allowed tool names.
     """
 
-    header = action.get_header(llm_tool.ALLOWED_TOOLS_HEADER, decode=True)
+    header = action.get_header(LLMHeaders.ALLOWED_TOOLS, decode=True)
     if header is None:
         return []
     return [tool.strip() for tool in header.split(",")]
@@ -93,8 +94,8 @@ def get_llm_and_api_key(action: actions.Action):
     :return: A tuple of (LLM, API key).
     """
 
-    llm = action.get_header(llm_tool.LLM_PROVIDER_HEADER, decode=True)
-    api_key = action.get_header(llm_tool.LLM_API_KEY_HEADER, decode=True)
+    llm = action.get_header(LLMHeaders.PROVIDER, decode=True)
+    api_key = action.get_header(LLMHeaders.API_KEY, decode=True)
 
     if not llm:
         raise ValueError(f"LLM header not set on {action.get_schema().name}")
@@ -102,46 +103,6 @@ def get_llm_and_api_key(action: actions.Action):
         api_key = ""
 
     return llm, api_key
-
-
-def forward_headers(
-    src: actions.Action,
-    dst: actions.Action,
-    headers: Sequence[str] = None,
-):
-    """
-    Forward tool headers from `src` to `dst`.
-
-    :param src: The source action.
-    :param dst: The destination action.
-    :param headers: Sequence of headers to forward. If None, forwards all
-        headers.
-    """
-
-    headers = headers or list(src.headers())
-    for header in headers:
-        dst.set_header(header, src.get_header(header))
-
-
-def forward_tool_headers(
-    src: actions.Action,
-    dst: actions.Action,
-):
-    """
-    Forward tool headers from `src` to `dst`, specifically for LLM-related headers.
-
-    :param src: The source action.
-    :param dst: The destination action.
-    """
-    forward_headers(
-        src,
-        dst,
-        headers=(
-            llm_tool.LLM_PROVIDER_HEADER,
-            llm_tool.LLM_API_KEY_HEADER,
-            llm_tool.ALLOWED_TOOLS_HEADER,
-        ),
-    )
 
 
 TOOL_RUNNER_SCHEMA = actions.ActionSchema(
@@ -170,6 +131,7 @@ async def _run_tool(
     input_dict_chunk: data.Chunk,
     output_node: async_node.AsyncNode,
     result_idx: int,
+    outer_action: actions.Action,
     headers: dict[str, str | bytes] = None,
 ):
     headers = headers or dict()
@@ -184,16 +146,21 @@ async def _run_tool(
         tool = tools[input_dict["name"]]
         _LOGGER.info(f"{input_dict["id"]} {input_dict['name']}")
 
-        allowed_tool_names = headers.get(
-            llm_tool.ALLOWED_TOOLS_HEADER, ""
-        ).split(",")
+        allowed_tool_names = headers.get(LLMHeaders.ALLOWED_TOOLS, "").split(
+            ","
+        )
         allowed_tool_names = [
             name.strip() for name in allowed_tool_names if name.strip()
         ]
         if input_dict["name"] not in allowed_tool_names:
             raise ValueError(f"Tool {input_dict['name']} is not allowed.")
 
-        result = await tool.run(input_dict["params"], registry, headers=headers)
+        result = await tool.run(
+            input_dict["params"],
+            registry,
+            outer_action=outer_action,
+            headers=headers,
+        )
         if result is None:
             raise ValueError(f"Tool {input_dict['name']} returned None.")
     except Exception as exc:
@@ -218,11 +185,11 @@ def make_llm_tool_runner():
         headers = dict()
 
         llm, api_key = get_llm_and_api_key(action)
-        headers[llm_tool.LLM_PROVIDER_HEADER] = llm
-        headers[llm_tool.LLM_API_KEY_HEADER] = api_key
+        headers[LLMHeaders.PROVIDER] = llm
+        headers[LLMHeaders.API_KEY] = api_key
         allowed_tools = get_allowed_tools(action)
         allowed_tools += ["submit_response__"]
-        headers[llm_tool.ALLOWED_TOOLS_HEADER] = ",".join(allowed_tools)
+        headers[LLMHeaders.ALLOWED_TOOLS] = ",".join(allowed_tools)
 
         tools = make_tools(action.get_registry(), allowed_tools)
 
@@ -241,6 +208,7 @@ def make_llm_tool_runner():
                         chunk,
                         action["outputs"],
                         tool_call_idx,
+                        action,
                         headers=headers,
                     )
                 )

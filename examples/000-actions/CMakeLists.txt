@@ -17,4 +17,5 @@ target_link_libraries(
         act::service
         act::net::webrtc
         act::proto
+        act::util::telemetry
 )

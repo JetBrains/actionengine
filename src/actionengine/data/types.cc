@@ -21,6 +21,7 @@
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
 #include <absl/time/clock.h>
+#include <unicode/unistr.h>
 
 namespace act::internal {
 std::vector<std::string> Indent(std::vector<std::string> fields, int num_spaces,
@@ -47,6 +48,14 @@ std::string Indent(std::string field, int num_spaces, bool indent_first_line) {
                        [](std::string* out, const std::string_view line) {
                          absl::StrAppend(out, line);
                        });
+}
+
+std::string CaseFold(std::string_view str) {
+  auto ustr = icu::UnicodeString::fromUTF8(str);
+  ustr.foldCase();
+  std::string folded;
+  ustr.toUTF8String(folded);
+  return folded;
 }
 }  // namespace act::internal
 
@@ -84,6 +93,18 @@ absl::StatusOr<std::reference_wrapper<NodeRef>> NodeFragment::GetNodeRef() {
   }
   return absl::InvalidArgumentError(
       "NodeFragment does not contain a NodeRef, but a Chunk instead.");
+}
+
+void ActionMessage::SetHeader(std::string_view key, std::string_view value) {
+  headers[internal::CaseFold(key)] = value;
+}
+
+void WireMessage::SetHeader(std::string_view key, std::string_view value) {
+  headers[internal::CaseFold(key)] = value;
+}
+
+std::string MakeScopedHeaderKey(std::string_view key) {
+  return internal::CaseFold(absl::StrCat(kActionEngineHeaderPrefix, key));
 }
 
 std::pair<bool, absl::Status> GetReasonIfIsAbortMessage(

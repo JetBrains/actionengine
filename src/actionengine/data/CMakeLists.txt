@@ -1,6 +1,54 @@
 add_library(actData STATIC)
 add_library(act::data ALIAS actData)
 
+if (APPLE)
+    execute_process(
+            COMMAND brew --prefix icu4c
+            OUTPUT_VARIABLE ICU_BREW_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    message("ICU_BREW_PREFIX " ${ICU_BREW_PREFIX})
+    find_path(ICU_BREW_INCLUDE_DIR
+            NAMES unicode/unistr.h
+            PATHS "${ICU_BREW_PREFIX}/include"
+            NO_DEFAULT_PATH
+            NO_SYSTEM_ENVIRONMENT_PATH
+            NO_CMAKE_FIND_ROOT_PATH
+            NO_CACHE
+    )
+    message("ICU_BREW_INCLUDE_DIR " ${ICU_BREW_INCLUDE_DIR})
+    find_library(ICU_UC_LIBRARY
+            NAMES icuuc
+            PATHS "${ICU_BREW_PREFIX}/lib"
+            NO_DEFAULT_PATH
+            NO_SYSTEM_ENVIRONMENT_PATH
+            NO_CMAKE_FIND_ROOT_PATH
+            NO_CACHE
+            REQUIRED
+    )
+    find_library(ICU_I18N_LIBRARY
+            NAMES icui18n
+            PATHS "${ICU_BREW_PREFIX}/lib"
+            NO_DEFAULT_PATH
+            NO_SYSTEM_ENVIRONMENT_PATH
+            NO_CMAKE_FIND_ROOT_PATH
+            NO_CACHE
+            REQUIRED
+    )
+    target_include_directories(actData PRIVATE ${ICU_BREW_INCLUDE_DIR})
+    target_link_libraries(actData PUBLIC
+            ${ICU_UC_LIBRARY}
+            ${ICU_I18N_LIBRARY}
+    )
+
+else ()
+    find_package(ICU COMPONENTS uc i18n REQUIRED)
+    target_link_libraries(actData PUBLIC
+            ICU::uc
+            ICU::i18n
+    )
+endif (APPLE)
+
 target_sources(actData
         PUBLIC
         conversion.h

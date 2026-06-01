@@ -34,6 +34,8 @@
 #include <actionengine/net/http/proxygen/wire_stream.h>
 #include <actionengine/service/service.h>
 #include <actionengine/util/status_macros.h>
+#include <actionengine/util/telemetry.h>
+#include <opentelemetry/nostd/shared_ptr.h>
 
 ABSL_FLAG(int32_t, port, 20000, "Port to bind to.");
 
@@ -68,7 +70,7 @@ absl::Status RunPrint(const std::shared_ptr<Action>& action) {
 
 absl::Status RunBidiEcho(const std::shared_ptr<Action>& action) {
   ASSIGN_OR_RETURN(const std::shared_ptr print_action,
-                   action->MakeActionInSameSession("print_text"));
+                   action->MakeNested("print_text"));
   if (auto status = print_action->Call(); !status.ok()) {
     return status;
   }
@@ -92,6 +94,7 @@ absl::Status RunBidiEcho(const std::shared_ptr<Action>& action) {
     act::SleepFor(absl::Seconds(kDelayBetweenWords + jitter));
   }
   RETURN_IF_ERROR(print_input->Put(act::EndOfStream()));
+  RETURN_IF_ERROR(print_action->Await());
 
   return absl::OkStatus();
 }
@@ -162,6 +165,7 @@ absl::Status Main(int argc, char** argv) {
     action->mutable_bound_resources()->set_node_map_non_owning(&node_map);
     action->mutable_bound_resources()->set_session_non_owning(&session);
     action->mutable_bound_resources()->set_stream_non_owning(stream.get());
+    action->set_header(act::telemetry::GetTelemetryHeaderName("trace-id"), "");
 
     RETURN_IF_ERROR(action->Call());
 
@@ -188,8 +192,11 @@ absl::Status Main(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+  act::telemetry::SetGlobalTracerProvider(
+      act::telemetry::GetHttpTracerProvider());
   CHECK_OK(Main(argc, argv))
       << "Failed to run the bidi actions example. See logs for details.";
+  act::telemetry::SetGlobalTracerProvider();
   return 0;
 }
 

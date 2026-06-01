@@ -15,7 +15,10 @@
 import hashlib
 import os
 
-from openai import AsyncOpenAI
+try:
+    from langfuse.openai import AsyncOpenAI
+except ImportError:
+    from openai import AsyncOpenAI
 
 
 def get_openai_client(api_key: str | None = None) -> AsyncOpenAI:
@@ -30,8 +33,6 @@ def get_openai_client(api_key: str | None = None) -> AsyncOpenAI:
     api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
 
     if api_key_hash not in get_openai_client._clients:
-        get_openai_client._clients[api_key_hash] = AsyncOpenAI(
-            api_key=api_key
-        )
+        get_openai_client._clients[api_key_hash] = AsyncOpenAI(api_key=api_key)
 
     return get_openai_client._clients[api_key_hash]

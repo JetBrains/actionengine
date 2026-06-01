@@ -37,6 +37,7 @@
 #include "actionengine/nodes/async_node.h"
 #include "actionengine/nodes/node_map.h"
 #include "actionengine/stores/chunk_store_reader.h"
+#include "actionengine/util/telemetry.h"
 
 namespace act {
 
@@ -277,8 +278,16 @@ class Action : public std::enable_shared_from_this<Action> {
       ABSL_LOCKS_EXCLUDED(ctx_.mu_);
   absl::Status MapPortsFromMessage(const ActionMessage& message);
 
-  absl::StatusOr<std::unique_ptr<Action>> MakeActionInSameSession(
-      std::string_view name, std::string_view action_id = "") const;
+  absl::StatusOr<std::unique_ptr<Action>> MakeNested(
+      ActionSchema schema, bool propagate_io = true,
+      bool forward_ae_headers = true) const;
+  absl::StatusOr<std::unique_ptr<Action>> MakeNested(
+      std::string_view name, bool propagate_io = true,
+      bool forward_ae_headers = true) const;
+
+  void ForwardHeader(Action* absl_nonnull target, std::string_view key) const;
+  void ForwardHeadersWithPrefix(Action* absl_nonnull target,
+                                std::string_view prefix) const;
 
   AsyncNode* absl_nullable GetInput(
       std::string_view name, std::optional<bool> bind_stream = std::nullopt);
@@ -310,10 +319,16 @@ class Action : public std::enable_shared_from_this<Action> {
   const ActionBoundResources& bound_resources() const;
   ActionBoundResources* absl_nonnull mutable_bound_resources();
 
+  std::string telemetry_span_id() const;
+
   const ActionSettings& settings() const;
   ActionSettings* absl_nonnull mutable_settings();
 
  private:
+  friend absl::StatusOr<
+      opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>>
+  GetOrCreateTelemetrySpanIfEnabled(Action* absl_nonnull action);
+
   static std::string GetNoChangeAfterExecWarningMessage(std::string_view field);
   void LogWarningIfChangedAfterExec(std::string_view field) const;
   void UnbindSessionInternal();
@@ -328,6 +343,7 @@ class Action : public std::enable_shared_from_this<Action> {
   ActionSettings settings_;
 
   ActionExecutionContext ctx_;
+  std::string telemetry_span_id_;
   absl::flat_hash_map<std::string, std::shared_ptr<void>> user_data_;
 };
 

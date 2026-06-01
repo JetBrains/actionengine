@@ -191,6 +191,18 @@ absl::StatusOr<std::optional<Chunk>> ChunkStore::Pop(int64_t seq) {
 }
 
 absl::Status ChunkStore::Put(int64_t seq, Chunk chunk, bool final) {
+  if (seq < -1) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Invalid seq number: ", seq));
+  }
+  if (seq == -1) {
+    ASSIGN_OR_RETURN(seq, Size());
+  }
+  if (chunk.IsNull() && !final) {
+    return absl::InvalidArgumentError(
+        "Cannot put a null chunk unless it is final.");
+  }
+
   const std::string stream_id = GetKey();
 
   std::vector<std::string> key_strings;

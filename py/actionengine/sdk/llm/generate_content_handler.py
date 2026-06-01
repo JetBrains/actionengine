@@ -132,11 +132,11 @@ async def generate_content(action: Action):
     )
 
     generate = (
-        Action.from_schema(schema)
+        action.make_nested(schema, propagate_io=False)
         .bind_handler(handler)
         .bind_registry(action.get_registry())
-        .run()
     )
+    generate.run()
     await generate["api_key"].put_and_finalize(api_key)
 
     async with asyncio.TaskGroup() as tg:

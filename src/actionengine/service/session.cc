@@ -499,6 +499,10 @@ absl::Status Session::DispatchActionMessageInternal(
   action->mutable_bound_resources()->set_session_non_owning(this);
   action->mutable_bound_resources()->set_stream_non_owning(origin_stream);
 
+  for (const auto& [header_key, header_value] : action_message.headers) {
+    action->set_header(header_key, header_value);
+  }
+
   // The session class is intended to represent a session where there is
   // another party involved. In this case, we want to clear inputs and outputs
   // after the action is run, because they will already have been sent to the

@@ -26,7 +26,7 @@ ECHO_SCHEMA = actionengine.ActionSchema(
 
 
 @pytest.mark.asyncio
-async def test_action_headers():
+async def test_action_headers_work():
     action = actionengine.Action(ECHO_SCHEMA, str(uuid.uuid4()))
     action.set_header("issuer", "user123")
     action.set_header("priority", bytes("high", "utf-8"))
@@ -49,6 +49,40 @@ async def test_action_headers():
 
     all_headers = set(action.headers())
     assert all_headers == {"issuer", "priority", "secret"}
+
+
+@pytest.mark.asyncio
+async def test_action_headers_are_folded():
+    action = actionengine.Action(ECHO_SCHEMA, str(uuid.uuid4()))
+    action.set_header("isSUEr", "user123")
+    action.set_header("Priority", bytes("high", "utf-8"))
+
+    issuer_bytes = action.get_header("issuer")
+    assert issuer_bytes == b"user123"
+    issuer_decoded = action.get_header("issuer", decode=True)
+    assert issuer_decoded == "user123"
+
+    all_headers = set(action.headers())
+    assert all_headers == {"issuer", "priority"}
+
+
+@pytest.mark.asyncio
+async def test_action_headers_propagate():
+    action = actionengine.Action(ECHO_SCHEMA, str(uuid.uuid4()))
+    action.set_header("x-ae-scoped-header", "test")
+
+    nested_default = action.make_nested(ECHO_SCHEMA)
+    assert (
+        nested_default.get_header("x-ae-scoped-header", decode=True) == "test"
+    )
+
+    nested_no_forward_headers = action.make_nested(
+        ECHO_SCHEMA, forward_ae_headers=False
+    )
+    assert (
+        nested_no_forward_headers.get_header("x-ae-scoped-header", decode=True)
+        is None
+    )
 
 
 @pytest.mark.asyncio

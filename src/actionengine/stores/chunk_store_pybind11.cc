@@ -275,8 +275,12 @@ void BindLocalChunkStore(py::handle scope, std::string_view name) {
              bool final) { return self->Put(seq, chunk, final); },
           py::arg("seq"), py::arg("chunk"), py::arg_v("final", false),
           py::call_guard<py::gil_scoped_release>())
-      .def("no_further_puts", &LocalChunkStore::CloseWritesWithStatus,
-           py::call_guard<py::gil_scoped_release>())
+      .def(
+          "no_further_puts",
+          [](const std::shared_ptr<LocalChunkStore>& self) -> absl::Status {
+            return self->CloseWritesWithStatus(absl::OkStatus());
+          },
+          py::call_guard<py::gil_scoped_release>())
       .def("size", &LocalChunkStore::Size)
       .def("contains", &LocalChunkStore::Contains)
       .def("set_id", &LocalChunkStore::SetId)

@@ -419,7 +419,11 @@ absl::Status ChunkStoreReader::FanoutBufferToWaiters() {
         }
         {
           mu_.unlock();
-          populate_status = waiter->SetValue(std::move(fragment_from_buffer));
+          if (!status->ok()) {
+            populate_status = waiter->SetError(*status);
+          } else {
+            populate_status = waiter->SetValue(std::move(fragment_from_buffer));
+          }
           mu_.lock();
           RETURN_IF_ERROR(populate_status);
         }

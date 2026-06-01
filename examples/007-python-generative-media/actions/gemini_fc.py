@@ -10,7 +10,6 @@ from google import genai
 from google.genai import types
 from PIL import Image
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -321,9 +320,7 @@ async def execute_prompt(action: actionengine.Action):
                         screenshot.alpha_composite(raw_screenshot)
                         screenshot = screenshot.convert("RGB")
 
-                        locate = action.make_action_in_same_session(
-                            "locate_objects"
-                        ).run()
+                        locate = action.make_nested("locate_objects").run()
                         await locate["prompt"].put_and_finalize(
                             "amorphous blob"
                         )

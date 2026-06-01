@@ -17,6 +17,7 @@
 
 #include <any>
 #include <atomic>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -25,10 +26,65 @@
 #include <absl/status/status.h>
 
 #include "actionengine/concurrency/concurrency.h"
-#include "thread/channel.h"
-#include "thread/fiber.h"
+#include "actionengine/data/types.h"
+
+namespace opentelemetry {
+inline namespace v1 {
+namespace nostd {
+template <typename T>
+class shared_ptr;
+}
+
+namespace trace {
+class Span;
+class SpanContext;
+class SpanId;
+class Provider;
+class TraceId;
+class Tracer;
+class TracerProvider;
+struct StartSpanOptions;
+
+absl::Status EgltAssignInto(SpanId from, std::string* absl_nonnull to);
+absl::Status EgltAssignInto(std::string from, SpanId* absl_nonnull to);
+absl::Status EgltAssignInto(TraceId from, std::string* absl_nonnull to);
+absl::Status EgltAssignInto(std::string from, TraceId* absl_nonnull to);
+}  // namespace trace
+}  // namespace v1
+}  // namespace opentelemetry
 
 namespace act {
+
+namespace telemetry {
+std::string GetTelemetryHeaderName(std::string_view name);
+
+opentelemetry::trace::SpanId GenerateSpanId();
+opentelemetry::trace::TraceId GenerateTraceId();
+
+opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
+GetHttpTracerProvider(
+    std::string_view url =
+        "https://langfuse.databao.dev/api/public/otel/v1/traces");
+
+void SetGlobalTracerProvider();
+void SetGlobalTracerProvider(
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>
+        provider);
+void InitDefaultTracerProvider();
+
+std::string GenerateSpanIdAsStdString();
+std::string GenerateTraceIdAsStdString();
+
+opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
+    std::string_view name);
+opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
+    std::string_view name, opentelemetry::trace::SpanContext parent_context);
+opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
+    std::string_view name,
+    const opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>& parent);
+opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> CreateSpan(
+    std::string_view name, opentelemetry::trace::StartSpanOptions options);
+}  // namespace telemetry
 
 class MetricStore;
 

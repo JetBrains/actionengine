@@ -32,7 +32,7 @@ async def run(action: actionengine.Action):
         )
 
         # 1. Create a plan of investigations.
-        create_plan = action.make_action_in_same_session("create_plan").run()
+        create_plan = action.make_nested("create_plan").run()
         await asyncio.gather(
             create_plan["api_key"].put_and_finalize(api_key),
             create_plan["topic"].put_and_finalize(topic),
@@ -48,9 +48,7 @@ async def run(action: actionengine.Action):
 
         investigations = []
         for idx, brief in enumerate(research_briefs):
-            investigate = action.make_action_in_same_session(
-                "investigate"
-            ).run()
+            investigate = action.make_nested("investigate").run()
             investigate.bind_streams_on_outputs_by_default(True)
             await asyncio.gather(
                 investigate["api_key"].put_and_finalize(api_key),
@@ -64,9 +62,7 @@ async def run(action: actionengine.Action):
             )
 
         # 3. Synthesize the findings.
-        synthesise = action.make_action_in_same_session(
-            "synthesise_findings"
-        ).run()
+        synthesise = action.make_nested("synthesise_findings").run()
         await asyncio.gather(
             synthesise["api_key"].put_and_finalize(api_key),
             synthesise["topic"].put_and_finalize(topic),

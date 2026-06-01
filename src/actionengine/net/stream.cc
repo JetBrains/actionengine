@@ -66,13 +66,13 @@ absl::Status MergeWireMessagesWhileInScope::Send(WireMessage message) {
     buffered_message_.actions.push_back(std::move(action));
   }
   for (auto& [key, value] : message.headers) {
-    auto it = buffered_message_.headers.find(key);
+    auto it = buffered_message_.headers.find(internal::CaseFold(key));
     if (it != buffered_message_.headers.end()) {
       // Key already exists, it's not up to us to decide how to merge headers.
       return absl::FailedPreconditionError(
           absl::StrFormat("Header key conflict while merging: %s", key));
     }
-    buffered_message_.headers[key] = std::move(value);
+    buffered_message_.SetHeader(key, std::move(value));
   }
   return absl::OkStatus();
 }

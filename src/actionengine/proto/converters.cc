@@ -205,7 +205,7 @@ absl::Status EgltAssignInto(act::proto::ActionMessage from,
   }
   to->headers.clear();
   for (auto& [key, value] : *from.mutable_headers()) {
-    to->headers[key] = std::move(value);
+    to->SetHeader(key, std::move(value));
   }
   return absl::OkStatus();
 }
@@ -249,7 +249,7 @@ absl::Status EgltAssignInto(act::proto::WireMessage from,
   }
   to->headers.clear();
   for (auto& [key, value] : *from.mutable_headers()) {
-    to->headers[key] = std::move(value);
+    to->SetHeader(key, std::move(value));
   }
   return absl::OkStatus();
 }

@@ -16,6 +16,7 @@
 
 #include <Python.h>
 #include <absl/debugging/failure_signal_handler.h>
+#include <opentelemetry/nostd/shared_ptr.h>
 #include <pybind11/cast.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/pybind11.h>
@@ -31,6 +32,7 @@
 #include "actionengine/service/service_pybind11.h"
 #include "actionengine/stores/chunk_store_pybind11.h"
 #include "actionengine/util/global_settings_pybind11.h"
+#include "actionengine/util/telemetry.h"
 #include "actionengine/util/utils_pybind11.h"
 
 namespace pybind11::detail {
@@ -43,6 +45,8 @@ namespace act {
 
 PYBIND11_MODULE(_C, m) {
   absl::InstallFailureSignalHandler({});
+  act::telemetry::SetGlobalTracerProvider(
+      act::telemetry::GetHttpTracerProvider());
   if (!pybind11::google::internal::IsStatusModuleImported()) {
     py::module_::import("actionengine.status");
     // importing under a custom path/name, so just in case check that the

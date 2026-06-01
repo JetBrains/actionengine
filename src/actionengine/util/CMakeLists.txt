@@ -23,6 +23,40 @@ target_link_libraries(
 )
 # --------------------------------------------------------------------------
 add_library(
+        actUtilTelemetry STATIC
+)
+add_library(
+        act::util::telemetry ALIAS
+        actUtilTelemetry
+)
+target_sources(actUtilTelemetry PRIVATE telemetry.cc)
+target_sources(actUtilTelemetry PUBLIC telemetry.h)
+
+target_include_directories(
+        actUtilTelemetry PUBLIC
+        ${ACTIONENGINE_PROJECT_TOP_LEVEL}
+        ${ACTIONENGINE_INCLUDE_DIR}
+        ${Boost_INCLUDE_DIRS}
+        ${ACTIONENGINE_THIRD_PARTY_INCLUDE_DIRS}
+)
+target_link_libraries(
+        actUtilTelemetry PUBLIC
+        opentelemetry-cpp::common
+        opentelemetry-cpp::sdk
+        opentelemetry-cpp::trace
+        opentelemetry-cpp::ostream_span_exporter
+        opentelemetry-cpp::otlp_http_exporter
+
+)
+target_link_libraries(
+        actUtilTelemetry PRIVATE
+        absl::base
+        absl::strings
+        act::data
+        act::concurrency
+)
+# --------------------------------------------------------------------------
+add_library(
         actUtilBoostJson STATIC
         boost_json.h
         boost_json.cc

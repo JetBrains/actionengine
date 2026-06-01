@@ -92,11 +92,11 @@ async def _run_tool_calls(
             f"`{action.get_schema().name}` {action.get_id()}"
         )
 
-    run_tools = registry.make_action(
-        TOOL_RUNNER_SCHEMA.name,
-        stream=None,
-        node_map=NodeMap(),
-    )
+    run_tools = action.make_nested(
+        TOOL_RUNNER_SCHEMA.name, propagate_io=True
+    ).bind_node_map(NodeMap())
+    # todo: unbind stream from run_tools
+
     run_tools.set_header(llm_tool.LLM_PROVIDER_HEADER, "openai")
     run_tools.set_header(llm_tool.LLM_API_KEY_HEADER, api_key)
     set_allowed_tools(run_tools, list(tool["name"] for tool in tools))
@@ -201,6 +201,13 @@ async def generate_content_openai(action: Action):
     new_thought = ""
     thoughts_finalized = False
 
+    trace_id = action.get_header("x-ae-otel-trace-id", decode=False)
+    span_id = action.get_telemetry_span_id()
+
+    if trace_id is not None:
+        trace_id = trace_id.hex()
+        span_id = span_id.hex()
+
     try:
         while True:
             create_kwargs = {
@@ -208,7 +215,13 @@ async def generate_content_openai(action: Action):
                 "input": input_items,
                 "max_output_tokens": config.max_output_tokens,
                 "stream": True,
+                "metadata": {
+                    "langfuse_session_id": f"{span_id}-session",
+                },
             }
+            if trace_id is not None:
+                create_kwargs["trace_id"] = trace_id
+                create_kwargs["parent_observation_id"] = span_id
             if system_prompt:
                 create_kwargs["instructions"] = system_prompt
             if openai_tools:

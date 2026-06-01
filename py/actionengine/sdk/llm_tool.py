@@ -26,11 +26,10 @@ from actionengine.actions import (
 )
 from actionengine.async_node import AsyncNode
 
-ALLOWED_TOOLS_HEADER = "x-ae-allowed-tools"
-LLM_PROVIDER_HEADER = "x-ae-llm-provider"
-LLM_MODEL_HEADER = "x-ae-llm-model"
-LLM_EXTRA_CONFIG_HEADER = "x-ae-llm-extra-config"
-LLM_API_KEY_HEADER = "x-ae-llm-api-key"
+from .llm import LLMHeaders
+
+LLM_PROVIDER_HEADER = LLMHeaders.PROVIDER
+LLM_API_KEY_HEADER = LLMHeaders.API_KEY
 
 _LOGGER = actionengine.logging.get_logger()
 
@@ -241,11 +240,14 @@ class LLMTool:
         input_dict: dict[str, Any] | None = None,
         registry: ActionRegistry | None = None,
         timeout: float = -1.0,
+        outer_action: actionengine.actions.Action = None,
         headers: dict[str, str | bytes] = None,
     ):
         input_dict = input_dict or dict()
         try:
-            return await self._run(input_dict, registry, timeout, headers)
+            return await self._run(
+                input_dict, registry, timeout, outer_action, headers
+            )
         finally:
             pass
 
@@ -254,6 +256,7 @@ class LLMTool:
         input_dict: dict[str, Any],
         registry: ActionRegistry,
         timeout: float = -1.0,
+        outer_action: actionengine.actions.Action = None,
         headers: dict[str, str | bytes] = None,
     ):
         started_at = time.perf_counter()
@@ -286,9 +289,9 @@ class LLMTool:
             excess_input_names = resolvable_input_names - all_input_names
             raise ValueError(f"Excess input fields: {excess_input_names}.")
 
-        action = registry.make_action(self._action_schema.name).bind_registry(
-            registry
-        )
+        action = outer_action.make_nested(
+            self._action_schema.name, propagate_io=False
+        ).bind_registry(registry)
 
         headers = headers or dict()
         for header_name, header_value in headers.items():

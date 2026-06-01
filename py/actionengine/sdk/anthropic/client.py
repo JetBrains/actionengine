@@ -15,6 +15,15 @@
 import hashlib
 import os
 
+try:
+    from opentelemetry.instrumentation.anthropic import AnthropicInstrumentor
+
+except ImportError:
+    AnthropicInstrumentor = None
+
+if AnthropicInstrumentor:
+    AnthropicInstrumentor().instrument()
+
 from anthropic import AsyncAnthropic
 
 

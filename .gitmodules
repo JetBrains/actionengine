@@ -46,3 +46,6 @@
 	path = third_party/proxygen
 	url = https://github.com/hpnkv/proxygen
 	branch = patch-2
+[submodule "third_party/opentelemetry-cpp"]
+	path = third_party/opentelemetry-cpp
+	url = https://github.com/open-telemetry/opentelemetry-cpp

@@ -14,4 +14,5 @@ target_link_libraries(
         act::net::http::proxygen
         act::nodes
         act::service
+        act::util::telemetry
 )

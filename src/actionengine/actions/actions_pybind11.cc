@@ -200,9 +200,6 @@ absl::StatusOr<ActionHandler> MakeSimpleActionHandler(py::handle py_handler) {
       result.emplace() = user_data->concurrent_future.attr("result")();
     } catch (py::error_already_set& e) {
       result.AssignStatus(PyExceptionToStatus(e));
-      DLOG(ERROR) << "[" << action->schema().name << " " << action->id()
-                  << "] ended with an exception: \033[91m" << result.status()
-                  << "\033[0m";
     }
 
     absl::Status raw_status = result.status();
@@ -707,6 +704,20 @@ void BindAction(py::handle scope, std::string_view name) {
            [](const std::shared_ptr<Action>& action) {
              return action->HasBeenRun();
            })
+      .def(
+          "forward_header",
+          [](const std::shared_ptr<Action>& self,
+             const std::shared_ptr<Action>& target,
+             std::string_view key) { self->ForwardHeader(target.get(), key); },
+          py::arg("target"), py::arg("key"))
+      .def(
+          "forward_headers_with_prefix",
+          [](const std::shared_ptr<Action>& self,
+             const std::shared_ptr<Action>& target,
+             std::string_view prefix = "") {
+            self->ForwardHeadersWithPrefix(target.get(), prefix);
+          },
+          py::arg("target"), py::arg_v("prefix", ""))
       .def("get_future",
            [](const std::shared_ptr<Action>& action) {
              const std::shared_ptr<PyUserData> user_data =
@@ -785,13 +796,32 @@ void BindAction(py::handle scope, std::string_view name) {
           },
           py::arg("name"), py::arg_v("bind_stream", py::none()),
           py::call_guard<py::gil_scoped_release>())
+      .def("get_telemetry_span_id",
+           [](const std::shared_ptr<Action>& action) -> py::bytes {
+             return {action->telemetry_span_id()};
+           })
       .def(
-          "make_action_in_same_session",
-          [](const std::shared_ptr<Action>& action, std::string_view name,
-             std::string_view id) -> absl::StatusOr<std::unique_ptr<Action>> {
-            return action->MakeActionInSameSession(name, id);
+          "make_nested",
+          [](const std::shared_ptr<Action>& action,
+             std::string_view action_name, bool propagate_io,
+             bool forward_ae_headers)
+              -> absl::StatusOr<std::unique_ptr<Action>> {
+            return action->MakeNested(action_name, propagate_io,
+                                      forward_ae_headers);
           },
-          py::arg("name"), py::arg_v("action_id", ""),
+          py::arg("name"), py::arg_v("propagate_io", true),
+          py::arg_v("forward_ae_headers", true),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "make_nested",
+          [](const std::shared_ptr<Action>& action, ActionSchema schema,
+             bool propagate_io, bool forward_ae_headers)
+              -> absl::StatusOr<std::unique_ptr<Action>> {
+            return action->MakeNested(std::move(schema), propagate_io,
+                                      forward_ae_headers);
+          },
+          py::arg("name"), py::arg_v("propagate_io", true),
+          py::arg_v("forward_ae_headers", true),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "bind_handler",

@@ -28,7 +28,7 @@
 #include "actionengine/concurrency/concurrency.h"
 #include "actionengine/data/types.h"
 #include "actionengine/util/map_util.h"
-#include "actionengine/util/metrics.h"
+#include "actionengine/util/telemetry.h"
 
 namespace act {
 
@@ -239,6 +239,22 @@ absl::StatusOr<std::optional<Chunk>> LocalChunkStore::Pop(int64_t seq) {
 
 absl::Status LocalChunkStore::Put(int64_t seq, Chunk chunk, bool final) {
   act::MutexLock lock(&mu_);
+
+  if (seq < -1) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Invalid seq number: ", seq));
+  }
+  if (seq == -1) {
+    if (total_chunks_put_ < max_seq_ - 1) {
+      return absl::InvalidArgumentError(
+          "Implicit seq numbers are only allowed when writing in order.");
+    }
+    seq = total_chunks_put_;
+  }
+  if (chunk.IsNull() && !final) {
+    return absl::InvalidArgumentError(
+        "Cannot put a null chunk unless it is final.");
+  }
 
   if (no_further_puts_) {
     return absl::FailedPreconditionError(

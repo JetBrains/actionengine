@@ -35,6 +35,8 @@ Port = _C.data.Port
 ActionMessage = _C.data.ActionMessage
 WireMessage = _C.data.WireMessage
 
+make_scoped_header_key = _C.data.make_scoped_header_key
+
 get_global_serializer_registry = _C.data.get_global_serializer_registry
 
 

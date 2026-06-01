@@ -6,7 +6,6 @@ import actionengine
 from stt.actions import make_action_registry
 from stt.serialisation import register_stt_serialisers
 
-
 SIGNALLING_URL = "wss://actionengine.dev:19001"
 
 

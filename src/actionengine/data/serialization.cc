@@ -41,16 +41,20 @@ absl::StatusOr<std::any> SerializerRegistry::Deserialize(
         "No deserializer is registered for mimetype %v.", mimetype));
   }
 
+  std::vector<absl::Status> error_per_serializer;
   for (auto deserializer_it = it->second.rbegin();
        deserializer_it != it->second.rend(); ++deserializer_it) {
     // Attempt to deserialize the data using the registered deserializer.
     if (auto result = (*deserializer_it)(data); result.ok()) {
       return std::move(*result);
+    } else {
+      error_per_serializer.push_back(std::move(result.status()));
     }
   }
 
-  return absl::UnimplementedError(absl::StrFormat(
-      "No deserializer could handle data for mimetype %v.", mimetype));
+  return absl::InternalError(
+      absl::StrCat("Failed to deserialize data for mimetype ", mimetype, ": ",
+                   absl::StrJoin(error_per_serializer, "; ")));
 }
 
 void SerializerRegistry::RegisterSerializer(std::string_view mimetype,

@@ -14,8 +14,15 @@
 
 #include "actionengine/actions/action.h"
 
+#include <absl/strings/match.h>
+#include <opentelemetry/context/runtime_context.h>
+#include <opentelemetry/nostd/shared_ptr.h>
+#include <opentelemetry/trace/tracer.h>
+
 #include "actionengine/service/session.h"
+#include "actionengine/stores/local_chunk_store.h"
 #include "actionengine/util/random.h"
+#include "actionengine/util/telemetry.h"
 
 namespace act {
 
@@ -616,6 +623,75 @@ void Action::UnbindSessionInternal() {
   bound_resources_.set_session(nullptr);
 }
 
+absl::StatusOr<opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>>
+GetOrCreateTelemetrySpanIfEnabled(Action* absl_nonnull action) {
+  CHECK(action != nullptr);
+  std::optional<std::string> trace_id_str =
+      action->get_header(telemetry::GetTelemetryHeaderName("trace-id"));
+  std::optional<std::string> parent_span_id_str =
+      action->get_header(telemetry::GetTelemetryHeaderName("parent-span-id"));
+  if (!trace_id_str) {
+    return opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>(
+        nullptr);
+  }
+  if (trace_id_str->empty()) {
+    if (parent_span_id_str) {
+      return absl::InvalidArgumentError(
+          "Parent span ID is set, but trace ID is empty.");
+    }
+    auto span = telemetry::CreateSpan(action->schema().name);
+    *trace_id_str = *ConvertTo<std::string>(span->GetContext().trace_id());
+    action->headers_[telemetry::GetTelemetryHeaderName("trace-id")] =
+        *trace_id_str;
+    action->telemetry_span_id_ =
+        *ConvertTo<std::string>(span->GetContext().span_id());
+    return span;
+  }
+  if (trace_id_str->size() != opentelemetry::trace::TraceId::kSize) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Invalid trace ID length: ", trace_id_str->size()));
+  }
+  if (parent_span_id_str &&
+      parent_span_id_str->size() != opentelemetry::trace::SpanId::kSize) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "Invalid parent span ID length: ", parent_span_id_str->size()));
+  }
+
+  static_assert(sizeof(std::string::value_type) == sizeof(uint8_t));
+
+  opentelemetry::trace::TraceId trace_id(
+      opentelemetry::nostd::span<uint8_t, opentelemetry::trace::TraceId::kSize>(
+          reinterpret_cast<uint8_t*>(trace_id_str->data()),
+          trace_id_str->size()));
+
+  opentelemetry::trace::StartSpanOptions opts;
+  opts.kind = opentelemetry::trace::SpanKind::kInternal;
+
+  if (parent_span_id_str) {
+    auto parent_span_id = opentelemetry::trace::SpanId(
+        opentelemetry::nostd::span<uint8_t,
+                                   opentelemetry::trace::SpanId::kSize>(
+            reinterpret_cast<uint8_t*>(parent_span_id_str->data()),
+            parent_span_id_str->size()));
+    opentelemetry::trace::SpanContext parent_span_context(
+        trace_id, std::move(parent_span_id), {},
+        /*is_remote=*/true);
+    if (!parent_span_context.IsValid()) {
+      return absl::InvalidArgumentError(
+          "Invalid parent span context: trace ID and parent span ID must be "
+          "valid.");
+    }
+    opts.parent = parent_span_context;
+  } else {
+    opts.parent = opentelemetry::trace::SpanContext{
+        trace_id, opentelemetry::trace::SpanId(), {}, true};
+  }
+  auto span = telemetry::CreateSpan(action->schema().name, std::move(opts));
+  action->telemetry_span_id_ =
+      *ConvertTo<std::string>(span->GetContext().span_id());
+  return span;
+}
+
 void ActionExecutionContext::RunHandlerWithPreparationAndCleanup(
     ActionHandler handler, const std::shared_ptr<Action>& action) {
   act::MutexLock lock(&mu_);
@@ -648,9 +724,20 @@ void ActionExecutionContext::RunHandlerWithPreparationAndCleanup(
     return;
   }
 
+  absl::StatusOr<opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span>>
+      telemetry_span_or = GetOrCreateTelemetrySpanIfEnabled(action.get());
+
   mu_.unlock();
-  absl::Status handler_status = std::move(handler)(action);
+  absl::Status handler_status;
+  if (!telemetry_span_or.ok()) {
+    handler_status = telemetry_span_or.status();
+  } else {
+    handler_status = std::move(handler)(action);
+  }
   mu_.lock();
+
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> telemetry_span =
+      *std::move(telemetry_span_or);
 
   // If any output nodes are not finalised by this point, report this in the
   // whole status:
@@ -678,6 +765,15 @@ void ActionExecutionContext::RunHandlerWithPreparationAndCleanup(
   ReleaseResourcesAfterRun_(action);
 
   run_state.run_result = handler_status;
+  if (telemetry_span) {
+    const auto telemetry_status_code =
+        handler_status.ok() ? opentelemetry::trace::StatusCode::kOk
+                            : opentelemetry::trace::StatusCode::kError;
+    const opentelemetry::nostd::string_view status_description{
+        handler_status.message().data(), handler_status.message().size()};
+    telemetry_span->SetStatus(telemetry_status_code, status_description);
+    telemetry_span->End();
+  }
 }
 
 void ActionExecutionContext::CommunicateHandlerStatus_(
@@ -999,12 +1095,39 @@ absl::Status Action::MapPortsFromMessage(const ActionMessage& message) {
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::unique_ptr<Action>> Action::MakeActionInSameSession(
-    std::string_view name, std::string_view action_id) const {
-  auto action =
-      std::make_unique<Action>(action_id.empty() ? GenerateUUID4() : action_id);
+absl::StatusOr<std::unique_ptr<Action>> Action::MakeNested(
+    ActionSchema schema, bool propagate_io, bool forward_ae_headers) const {
+  auto action = std::make_unique<Action>(GenerateUUID4());
 
-  std::shared_ptr<ActionRegistry> registry = bound_resources_.borrow_registry();
+  *action->mutable_bound_resources() =
+      ActionBoundResources::SameAs(bound_resources_);
+  action->set_schema(std::move(schema));
+
+  if (!propagate_io) {
+    action->mutable_bound_resources()->set_session(nullptr);
+    action->mutable_bound_resources()->set_stream(nullptr);
+    action->mutable_bound_resources()->set_node_map(
+        std::make_shared<NodeMap>());
+  }
+
+  if (forward_ae_headers) {
+    ForwardHeadersWithPrefix(action.get(), kActionEngineHeaderPrefix);
+  }
+
+  if (has_header(telemetry::GetTelemetryHeaderName("trace-id"))) {
+    if (!telemetry_span_id_.empty()) {
+      action->set_header(telemetry::GetTelemetryHeaderName("parent-span-id"),
+                         telemetry_span_id_);
+    }
+  }
+
+  return action;
+}
+
+absl::StatusOr<std::unique_ptr<Action>> Action::MakeNested(
+    std::string_view name, bool propagate_io, bool forward_ae_headers) const {
+  const std::shared_ptr<ActionRegistry> registry =
+      bound_resources_.borrow_registry();
   if (registry == nullptr) {
     return absl::FailedPreconditionError(absl::StrCat(
         "Cannot make action in same session: no registry is bound."));
@@ -1015,13 +1138,34 @@ absl::StatusOr<std::unique_ptr<Action>> Action::MakeActionInSameSession(
                      "` is not registered."));
   }
 
-  *action->mutable_bound_resources() =
-      ActionBoundResources::SameAs(bound_resources_);
   ASSIGN_OR_RETURN(const ActionSchema& schema, registry->GetSchema(name));
   ASSIGN_OR_RETURN(const ActionHandler& handler, registry->GetHandler(name));
+  ASSIGN_OR_RETURN(auto action,
+                   MakeNested(schema, propagate_io, forward_ae_headers));
   action->set_handler(handler);
-  action->set_schema(schema);
+
   return action;
+}
+
+void Action::ForwardHeader(Action* absl_nonnull target,
+                           std::string_view key) const {
+  CHECK(target != nullptr);
+  const std::string key_folded = internal::CaseFold(key);
+  if (const auto it = headers_.find(key_folded); it != headers_.end()) {
+    target->headers_[key_folded] = it->second;
+  }
+}
+
+void Action::ForwardHeadersWithPrefix(Action* absl_nonnull target,
+                                      std::string_view prefix) const {
+  CHECK(target != nullptr);
+  const std::string prefix_folded = internal::CaseFold(prefix);
+  for (const auto& [key, value] : headers_) {
+    const std::string key_folded = internal::CaseFold(key);
+    if (absl::StartsWith(key_folded, prefix_folded)) {
+      target->headers_[key_folded] = value;
+    }
+  }
 }
 
 AsyncNode* Action::GetInput(std::string_view name,
@@ -1136,19 +1280,20 @@ const absl::flat_hash_map<std::string, std::string>& Action::headers() const {
 }
 
 std::optional<std::string> Action::get_header(std::string_view key) const {
-  if (const auto it = headers_.find(key); it != headers_.end()) {
+  if (const auto it = headers_.find(internal::CaseFold(key));
+      it != headers_.end()) {
     return it->second;
   }
   return std::nullopt;
 }
 
 bool Action::has_header(std::string_view key) const {
-  return headers_.contains(key);
+  return headers_.contains(internal::CaseFold(key));
 }
 
 void Action::set_header(std::string_view key, std::string_view value) {
   LogWarningIfChangedAfterExec("headers");
-  headers_[key] = value;
+  headers_[internal::CaseFold(key)] = value;
 }
 
 void Action::remove_header(std::string_view key) {
@@ -1163,6 +1308,10 @@ const ActionBoundResources& Action::bound_resources() const {
 ActionBoundResources* Action::mutable_bound_resources() {
   LogWarningIfChangedAfterExec("bound_resources");
   return &bound_resources_;
+}
+
+std::string Action::telemetry_span_id() const {
+  return telemetry_span_id_;
 }
 
 absl::StatusOr<std::shared_ptr<void>> Action::GetUserData(

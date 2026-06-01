@@ -21,6 +21,7 @@ target_include_directories(
 target_link_libraries(
         actActions PRIVATE
         act::util::boost_json
+        act::util::telemetry
         absl::base
         absl::flat_hash_map
         absl::log

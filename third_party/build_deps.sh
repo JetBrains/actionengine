@@ -272,3 +272,35 @@ cmake \
   ..
 cmake --build . --parallel "${parallelism}" --target install
 cd "${third_party_root}"
+
+cd proxygen/proxygen
+if [[ "${SKIP_PROXYGEN}" != "1" ]]; then
+./build.sh
+./install.sh
+fi
+cd "${third_party_root}"
+
+# opentelemetry-cpp
+mkdir -p build_deps/opentelemetry-cpp && cd opentelemetry-cpp
+# if ACTIONENGINE_CLEAR_3P_BUILDS is set to 1, remove previous build folders
+if [[ "${clear_build_env}" == "1" ]]; then
+    rm -rf "${build_folder_name}"
+    rm -rf "${third_party_root}/build_deps/opentelemetry-cpp"
+fi
+mkdir -p "${build_folder_name}" && cd "${build_folder_name}"
+echo $(pwd)
+PATH="${third_party_root}/build_deps/protobuf:${third_party_root}/build_deps/googletest:${third_party_root}/build_deps/abseil-cpp":${PATH} cmake \
+  -DCMAKE_CXX_STANDARD="20" \
+  -DCMAKE_INSTALL_PREFIX="${third_party_root}/build_deps/opentelemetry-cpp" \
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+  -Dabsl_DIR="${abseil_install_dir}/lib/cmake/absl" \
+  -DProtobuf_DIR="${third_party_root}/lib/cmake/protobuf" \
+  -Dprotobuf_DIR="${third_party_root}/lib/cmake/protobuf" \
+  -DgRPC_PROVIDER=find_package \
+  -DCMAKE_FIND_DEBUG_MODE=ON \
+  -DCMAKE_PREFIX_PATH="${third_party_root}/build_deps/protobuf:${third_party_root}/build_deps/googletest:${third_party_root}/build_deps/abseil-cpp" \
+  -DWITH_OTLP_HTTP=ON \
+  -G "Ninja" \
+  ..
+cmake --build . --parallel "${parallelism}" --target install
+cd "${third_party_root}"

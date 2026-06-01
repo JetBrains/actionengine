@@ -85,7 +85,7 @@ async def test_webrtc_stream_works():
 
         received = await echo["output"].consume(allow_none=True)
         assert (
-                received is not None
+            received is not None
         ), "Did not receive any message from echo action"
         assert received == "Hello, WebRTC!", "Received incorrect message"
 

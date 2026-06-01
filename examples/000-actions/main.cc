@@ -24,9 +24,10 @@
 #include <actionengine/net/webrtc/wire_stream.h>
 #include <actionengine/nodes/async_node.h>
 #include <actionengine/service/service.h>
-#include <actionengine/util/metrics.h>
 #include <actionengine/util/random.h>
 #include <actionengine/util/status_macros.h>
+#include <actionengine/util/telemetry.h>
+#include <opentelemetry/nostd/shared_ptr.h>
 
 ABSL_FLAG(uint16_t, port, 20000, "Port to try to bind the WebRTC server to.");
 
@@ -145,6 +146,7 @@ absl::StatusOr<std::string> CallEcho(
   echo->mutable_bound_resources()->set_node_map_non_owning(session->node_map());
   echo->mutable_bound_resources()->set_session_non_owning(session);
   echo->mutable_bound_resources()->set_stream_non_owning(stream.get());
+  echo->set_header(act::telemetry::GetTelemetryHeaderName("trace-id"), "");
 
   {
     if (const auto status = echo->Call(); !status.ok()) {
@@ -244,7 +246,11 @@ absl::Status Main(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+
+  act::telemetry::SetGlobalTracerProvider(
+      act::telemetry::GetHttpTracerProvider());
   absl::Status status = Main(argc, argv);
+  act::telemetry::SetGlobalTracerProvider();
   if (!status.ok()) {
     LOG(ERROR) << "Error: " << status;
     return 1;

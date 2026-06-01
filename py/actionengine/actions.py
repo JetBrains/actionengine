@@ -19,7 +19,6 @@ import inspect
 from typing import Any
 from typing import Awaitable
 from typing import Callable
-from typing import Sequence
 
 import actionengine
 from actionengine import _C
@@ -248,7 +247,7 @@ class Action(_C.actions.Action):
     async def wait_until_complete(self, timeout: float = -1.0):
         """Waits for the action to complete with an optional timeout."""
         if self.has_been_run():
-            future = _C.actions.Action.get_future(self)
+            future = self.get_future()
             if future is None:
                 raise RuntimeError("Action Future is not set.")
             await asyncio.wait_for(future, timeout if timeout >= 0 else None)
@@ -361,13 +360,18 @@ class Action(_C.actions.Action):
 
         return utils.wrap_pybind_object(AsyncNode, node)
 
-    def make_action_in_same_session(
-        self, name: str, action_id: str = ""
+    def make_nested(
+        self,
+        name_or_schema: str | ActionSchema,
+        propagate_io: bool = True,
+        forward_ae_headers: bool = True,
     ) -> "Action":
         """Creates an action in the same session."""
         return utils.wrap_pybind_object(
             Action,
-            super().make_action_in_same_session(name),
+            super().make_nested(
+                name_or_schema, propagate_io, forward_ae_headers
+            ),
         )
 
     def run(self) -> "Action":

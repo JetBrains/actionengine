@@ -50,6 +50,8 @@ std::vector<std::string> Indent(std::vector<std::string> fields,
 
 std::string Indent(std::string field, int num_spaces = 0,
                    bool indent_first_line = false);
+std::string CaseFold(std::string_view str);
+bool EqualsCaseFold(std::string_view lhs, std::string_view rhs);
 }  // namespace internal
 
 /**
@@ -211,6 +213,8 @@ struct Port {
   }
 };
 
+constexpr std::string_view kActionEngineHeaderPrefix = "x-ae-";
+
 /**
  * An action message containing the information necessary to call an action.
  *
@@ -246,6 +250,8 @@ struct ActionMessage {
    * extensibility and the inclusion of custom metadata as needed.
    */
   absl::flat_hash_map<std::string, std::string> headers;
+
+  void SetHeader(std::string_view key, std::string_view value);
 
   template <typename Sink>
   friend void AbslStringify(Sink& sink, const ActionMessage& action);
@@ -284,6 +290,8 @@ struct WireMessage {
    */
   absl::flat_hash_map<std::string, std::string> headers;
 
+  void SetHeader(std::string_view key, std::string_view value);
+
   template <typename Sink>
   friend void AbslStringify(Sink& sink, const WireMessage& message);
 
@@ -292,6 +300,8 @@ struct WireMessage {
            lhs.actions == rhs.actions;
   }
 };
+
+std::string MakeScopedHeaderKey(std::string_view key);
 
 inline bool IsHalfCloseMessage(const WireMessage& message) {
   return message.actions.empty() && message.node_fragments.empty();
