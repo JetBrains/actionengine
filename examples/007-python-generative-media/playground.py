@@ -49,7 +49,7 @@ from actions.memory.search import search
 from actions.memory.search_schema import SEARCH_MEMORIES_SCHEMA
 from actions.memory.search_schemas import search_schemas
 from actions.memory.search_schemas_schema import SEARCH_SCHEMAS_SCHEMA
-from actions.memory.data_types import (
+from bao.memory.api.types import (
     CreateMemoryRequest,
     SearchRequest,
     SearchSchemasRequest,
