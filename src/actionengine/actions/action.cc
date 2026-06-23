@@ -918,12 +918,13 @@ absl::Status Action::RunInBackground(bool detach) {
       return absl::FailedPreconditionError(
           "Cannot run action: it has already been called.");
     }
+    auto action = shared_from_this();
     ctx_.detached_ = detach;
-    ctx_.progress_state_ = ActionRunState{
-        .fiber = thread::NewTree({}, [action = shared_from_this()]() {
-          action->ctx_.RunHandlerWithPreparationAndCleanup(
-              std::move(action->handler_), action);
-        })};
+    ctx_.progress_state_ =
+        ActionRunState{.fiber = thread::NewTree({}, [action]() {
+                         action->ctx_.RunHandlerWithPreparationAndCleanup(
+                             std::move(action->handler_), action);
+                       })};
   }
 
   return absl::OkStatus();
