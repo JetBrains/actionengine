@@ -30,8 +30,8 @@ WorkerThreadPool::~WorkerThreadPool() {
     act::concurrency::impl::MutexLock lock(&mu_);
     shutdown_ = true;
     cv_.SignalAll();
-    for (auto& [thread] : workers_) {
-      thread.join();
+    for (auto& worker : workers_) {
+      worker.thread.join();
     }
   })->Join();
 }
@@ -45,21 +45,29 @@ void WorkerThreadPool::Start(size_t num_threads) {
 
           act::concurrency::impl::MutexLock lock(&mu_);
           while (!shutdown_) {
-            cv_.Wait(&mu_);
-            if (shutdown_) {
-              break;
-            }
             while (!work_queue_.empty()) {
               boost::intrusive_ptr<boost::fibers::context> ctx =
                   work_queue_.front();
               work_queue_.pop_front();
 
+              // We are a worker thread, so we have a scheduler.
+              // We attach the fiber to our scheduler and then schedule it.
+              // Because we use shared_work, other workers can pick it up too.
               boost::fibers::context* active_ctx =
                   boost::fibers::context::active();
 
               active_ctx->attach(ctx.get());
               active_ctx->schedule(ctx.get());
             }
+            if (shutdown_) {
+              break;
+            }
+            cv_.WaitWithTimeout(&mu_, absl::Milliseconds(50));
+            // Release the lock to allow the scheduler to run and process fibers
+            // from the shared pool.
+            mu_.unlock();
+            boost::this_fiber::yield();
+            mu_.lock();
           }
           DLOG(INFO) << absl::StrFormat("Worker %zu exiting.", idx);
         }),

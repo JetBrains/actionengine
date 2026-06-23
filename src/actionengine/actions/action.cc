@@ -728,7 +728,14 @@ void ActionExecutionContext::RunHandlerWithPreparationAndCleanup(
       telemetry_span_or = GetOrCreateTelemetrySpanIfEnabled(action.get());
 
   mu_.unlock();
-  absl::Status handler_status = std::move(handler)(action);
+  absl::Status handler_status;
+  // Handlers must not throw, however, they still might not technically
+  // come noexcept from code that uses the library
+  try {
+    handler_status = std::move(handler)(action);
+  } catch (const std::exception& e) {
+    handler_status = absl::InternalError(e.what());
+  }
   mu_.lock();
 
   opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> telemetry_span;
