@@ -2,10 +2,10 @@ import asyncio
 
 import actionengine
 import httpx
+from bao import status
+from bao.memory.api.types import SearchRequest, ObjectMemoryOut, QueryParameters
 
 from . import api_utils
-from . import status
-from .data_types import SearchRequest, ObjectMemoryOut, QueryParameters
 
 Status = status.Status
 StatusCode = status.StatusCode

@@ -1,8 +1,8 @@
 import json
 
 import actionengine
+from bao.memory.api.types import ActionName, CreateMemoryRequest
 
-from .data_types import ActionName, CreateMemoryRequest
 from ..dbqa.utils import ask_llm_to_flag_disallowed_use
 
 CREATE_MEMORY_SCHEMA = actionengine.ActionSchema(

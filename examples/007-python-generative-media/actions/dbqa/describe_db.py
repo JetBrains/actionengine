@@ -8,11 +8,11 @@ from actionengine.sdk.llm_tool import LLM_PROVIDER_HEADER, LLM_API_KEY_HEADER
 from actionengine.sdk.llm_tool_runner import (
     set_allowed_tools,
 )
+from bao.memory.api.types import ActionName as MemoryActionName
 
 from .answer_question_schema import ANSWER_QUESTION_SCHEMA
 from .answer_question import answer_question
 from .logging import get_logger
-from ..memory.data_types import ActionName as MemoryActionName
 
 _LOGGER = get_logger()
 _CACHED_DB_DESCRIPTIONS: dict[str, str] = {}

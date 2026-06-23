@@ -52,7 +52,7 @@ def _select_and_enqueue_rows(
     conn.commit()
 
     conn.set_progress_handler(
-        _make_timeout_handler(started_at, timeout=15.0), 1000
+        _make_timeout_handler(started_at, timeout=15.0), 1
     )
     cursor = conn.cursor()
 

@@ -1,13 +1,13 @@
 import json
 
 import actionengine
-
-from .data_types import (
+from bao.memory.api.types import (
     ActionName,
     SearchRequest,
     ObjectMemoryOut,
     QueryParameters,
 )
+
 from ..dbqa.utils import ask_llm_to_flag_disallowed_use
 
 SEARCH_MEMORIES_SCHEMA = actionengine.ActionSchema(

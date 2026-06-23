@@ -12,6 +12,7 @@ from actionengine.sdk.llm_tool_runner import (
     enable_llm_tool_runner,
     set_allowed_tools,
 )
+from bao.memory.api.types import ActionName as MemoryActionName
 
 from actions.dbqa.answer_question_schema import ANSWER_QUESTION_SCHEMA
 from actions.dbqa.answer_question import answer_question
@@ -23,7 +24,6 @@ from actions.dbqa.judge_result_schema import JUDGE_RESULT_SCHEMA
 from actions.dbqa.judge_result import judge_result
 from actions.dbqa.validate_query_schema import VALIDATE_QUERY_SCHEMA
 from actions.dbqa.validate_query import sign_query, validate_query
-from actions.memory.data_types import ActionName as MemoryActionName
 from actions.memory.utils import (
     register_actions as register_memory_actions,
     autofill_api_inputs as autofill_memory_api_inputs,
@@ -167,7 +167,7 @@ async def main(args: argparse.Namespace):
                 continue
             local_problems.append(problem)
 
-    semaphore = asyncio.Semaphore(1)
+    semaphore = asyncio.Semaphore(16)
 
     async def _solve_problem(problem: dict, result_root: str | Path):
         async with semaphore:
@@ -188,7 +188,7 @@ async def main(args: argparse.Namespace):
                 pass
 
     async with asyncio.TaskGroup() as tg:
-        for problem_idx, problem in enumerate(local_problems[30:31]):
+        for problem_idx, problem in enumerate(local_problems):
             tg.create_task(
                 _solve_problem(
                     problem,
