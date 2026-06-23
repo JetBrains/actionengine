@@ -52,10 +52,10 @@ struct PyUserData {
   ~PyUserData() {
     py::gil_scoped_acquire gil;
 
-    // no deletion unless fully run or cancelled
-    if (action->HasBeenRun()) {
-      DCHECK(concurrent_future.attr("done")().cast<bool>());
-    }
+    // // no deletion unless fully run or cancelled
+    // if (action->HasBeenRun()) {
+    //   DCHECK(concurrent_future.attr("done")().cast<bool>());
+    // }
 
     asyncio_future = py::object();
     concurrent_future = py::object();

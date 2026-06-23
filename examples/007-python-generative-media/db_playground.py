@@ -167,7 +167,7 @@ async def main(args: argparse.Namespace):
                 continue
             local_problems.append(problem)
 
-    semaphore = asyncio.Semaphore(16)
+    semaphore = asyncio.Semaphore(64)
 
     async def _solve_problem(problem: dict, result_root: str | Path):
         async with semaphore:

@@ -28,12 +28,15 @@ async def describe_db(action: actionengine.Action):
 
     input_timeout = 3000.0
 
-    if not hasattr(describe_db, "lock"):
-        describe_db.lock = asyncio.Lock()
+    if not hasattr(describe_db, "locks"):
+        describe_db.locks = {}
 
     db_url = await action["db_url"].consume(input_timeout)
 
-    async with describe_db.lock:
+    if db_url not in describe_db.locks:
+        describe_db.locks[db_url] = asyncio.Lock()
+
+    async with describe_db.locks[db_url]:
         if db_url in _CACHED_DB_DESCRIPTIONS:
             await action["description"].put_and_finalize(
                 _CACHED_DB_DESCRIPTIONS[db_url]
