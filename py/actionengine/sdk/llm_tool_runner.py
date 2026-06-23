@@ -13,6 +13,9 @@
 # limitations under the License.
 
 import asyncio
+import datetime
+import traceback
+import uuid
 from typing import Sequence
 
 from actionengine import actions
@@ -21,6 +24,7 @@ from actionengine import data
 from actionengine.logging import get_logger
 from actionengine.sdk import llm_tool
 from actionengine.sdk.llm import LLMHeaders
+from pydantic import BaseModel
 
 _LOGGER = get_logger()
 
@@ -173,8 +177,27 @@ async def _run_tool(
             mimetype="application/json",
         )
     else:
+        result_dicts = result
+
+        if isinstance(result, list):
+            result_dicts = []
+            for single_result in result:
+                if isinstance(single_result, BaseModel):
+                    result_dicts.append(single_result.model_dump())
+                else:
+                    result_dicts.append(single_result)
+
+        for d in result_dicts:
+            if not isinstance(d, dict):
+                continue
+            for key, value in d.items():
+                if isinstance(value, uuid.UUID):
+                    d[key] = str(value)
+                if isinstance(value, datetime.datetime):
+                    d[key] = value.isoformat()
+
         await output_node.put(
-            result,
+            result_dicts,
             seq=result_idx,
             mimetype="application/json",
         )

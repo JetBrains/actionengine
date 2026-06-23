@@ -204,7 +204,7 @@ async def generate_content_openai(action: Action):
     trace_id = action.get_header("x-ae-otel-trace-id", decode=False)
     span_id = action.get_telemetry_span_id()
 
-    if trace_id is not None:
+    if trace_id is not None and span_id is not None:
         trace_id = trace_id.hex()
         span_id = span_id.hex()
 

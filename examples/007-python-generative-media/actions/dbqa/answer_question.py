@@ -164,6 +164,11 @@ async def answer_question(action: actionengine.Action):
         else "claude-sonnet-4-6"
     )
 
+    memory_scope_instruction = ""
+    memory_scope = action.get_header("x-ae-memory-scope", decode=True)
+    if memory_scope is not None:
+        memory_scope_instruction = f"\n\nIn memory tools, save and filter memories that are specific to the database using this scope: {memory_scope}. If the tip is about tool use or SQL refinement in general, use `sql-general` as scope instead. Add this scope to metadata as a field called `scope`."
+
     tools = make_tools(registry, allowed_tool_names)
     for tool_name, tool in tools.items():
         schema_dict = tool.get_schema().model_dump()
@@ -187,6 +192,7 @@ async def answer_question(action: actionengine.Action):
                     in allowed_tool_names,
                 },
             )
+            + memory_scope_instruction
         ),
         generate["interaction_token"].put_and_finalize(""),
         generate["config"].finalize(),
