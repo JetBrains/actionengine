@@ -728,16 +728,13 @@ void ActionExecutionContext::RunHandlerWithPreparationAndCleanup(
       telemetry_span_or = GetOrCreateTelemetrySpanIfEnabled(action.get());
 
   mu_.unlock();
-  absl::Status handler_status;
-  if (!telemetry_span_or.ok()) {
-    handler_status = telemetry_span_or.status();
-  } else {
-    handler_status = std::move(handler)(action);
-  }
+  absl::Status handler_status = std::move(handler)(action);
   mu_.lock();
 
-  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> telemetry_span =
-      *std::move(telemetry_span_or);
+  opentelemetry::nostd::shared_ptr<opentelemetry::trace::Span> telemetry_span;
+  if (telemetry_span_or.ok()) {
+    telemetry_span = *std::move(telemetry_span_or);
+  }
 
   // If any output nodes are not finalised by this point, report this in the
   // whole status:

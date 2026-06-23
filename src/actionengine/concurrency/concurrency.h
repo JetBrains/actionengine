@@ -188,11 +188,6 @@ class FutureState {
     return cancelled_;
   }
 
-  bool Expired() const {
-    act::MutexLock lock(&mu_);
-    return absl::Now() >= deadline_;
-  }
-
   absl::Time deadline() const {
     act::MutexLock lock(&mu_);
     return deadline_;
@@ -353,7 +348,7 @@ class Future {
     return state_->WaitForValueOrErrorUntil(deadline);
   }
 
-  std::shared_ptr<State> state() { return state_; }
+  std::shared_ptr<State> state() const { return state_; }
 
  private:
   std::shared_ptr<State> state_;

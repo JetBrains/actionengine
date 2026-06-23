@@ -367,7 +367,7 @@ absl::Status ChunkStoreReader::FanoutBufferToWaiters() {
       mu_.lock();
       continue;
     }
-    if (waiter->Expired()) {
+    if (absl::Now() >= waiter->deadline()) {
       mu_.unlock();
       waiter->SetError(absl::DeadlineExceededError("Deadline exceeded."))
           .IgnoreError();

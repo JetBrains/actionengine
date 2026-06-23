@@ -132,6 +132,7 @@ target_link_libraries(
         act::util::telemetry
         Python::Module
         Python::Python
+        opentelemetry-cpp::common
         opentelemetry-cpp::otlp_http_exporter
         ${ACTIONENGINE_PYBIND11_DEPENDENCIES}
 )

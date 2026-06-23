@@ -38,7 +38,7 @@ class ActSchema(BaseModel):
         arbitrary_types_allowed = True
 
 
-PYDANTIC2_SPECIAL_NAMES = {
+PYDANTIC_SPECIAL_NAMES = {
     "",
 }
 
@@ -88,9 +88,9 @@ def packb_with_basic_collections(obj: Any, **kwargs):
     return ormsgpack.packb(
         obj,
         option=(
-                ormsgpack.OPT_SERIALIZE_NUMPY
-                | ormsgpack.OPT_SERIALIZE_PYDANTIC
-                | ormsgpack.OPT_UTC_Z
+            ormsgpack.OPT_SERIALIZE_NUMPY
+            | ormsgpack.OPT_SERIALIZE_PYDANTIC
+            | ormsgpack.OPT_UTC_Z
         ),
         **kwargs,
     )
@@ -111,7 +111,7 @@ def _numpy_outer_type_to_dtype(outer_type: Any) -> np.dtype | None:
 
 
 def _deserialize_unpacked_numpy(
-        data: list, model: Optional[type[np.ndarray] | types.GenericAlias] = None
+    data: list, model: Optional[type[np.ndarray] | types.GenericAlias] = None
 ):
     if issubclass(model, np.ndarray):
         dtype = np.uint8
@@ -130,9 +130,9 @@ PYDANTIC_SPECIAL_NAMES = {
 
 
 def _coerce_elements_of_basic_collections(
-        unpacked: list | dict | tuple | set,
-        model: type | BaseModel | None,
-        validate: bool = True,
+    unpacked: list | dict | tuple | set,
+    model: type | BaseModel | None,
+    validate: bool = True,
 ):
     model_origin = typing.get_origin(model)
     if model_origin is None:
@@ -198,19 +198,84 @@ def _coerce_elements_of_basic_collections(
 
 
 def deserialize_unpacked(
-        unpacked,
-        model: type | BaseModel | None = None,
-        validate: bool = True,
-        required: bool = True,
+    unpacked,
+    model: type | BaseModel | None = None,
+    validate: bool = True,
+    required: bool = True,
 ):
     if model is None:
         return unpacked
 
     model_origin = typing.get_origin(model)
+
+    if model_origin in (UnionType, typing.Union):
+        possible_types = typing.get_args(model)
+        if unpacked is None:
+            if NoneType in possible_types:
+                return None
+            if not required:
+                return None
+            if validate:
+                raise ValueError("Required field is None")
+
+        # Try types that don't cause coercion first
+        for possible_type in possible_types:
+            if possible_type is NoneType:
+                continue
+
+            # Skip types that are known to coerce if they don't match the input type
+            # This is a bit of a heuristic to avoid unwanted coercions
+            if possible_type is int and isinstance(unpacked, (float, str)):
+                continue
+            if possible_type is float and isinstance(unpacked, str):
+                continue
+            if possible_type is str and not isinstance(unpacked, (str, bytes)):
+                continue
+
+            try:
+                return deserialize_unpacked(
+                    unpacked,
+                    possible_type,
+                    validate=validate,
+                    required=required,
+                )
+            except (TypeError, AttributeError, ValueError):
+                pass
+
+        # If no match found, try everything including potential coercions
+        for possible_type in possible_types:
+            if possible_type is NoneType:
+                continue
+            try:
+                return deserialize_unpacked(
+                    unpacked,
+                    possible_type,
+                    validate=validate,
+                    required=required,
+                )
+            except (TypeError, AttributeError, ValueError):
+                pass
+
+        raise TypeError(
+            f"Cannot construct a {model} from a {type(unpacked)} object."
+        )
+
+    if model_origin is typing.Literal:
+        allowed_values = typing.get_args(model)
+        if unpacked in allowed_values:
+            return unpacked
+        raise TypeError(
+            f"Value {unpacked} is not one of the allowed values {allowed_values} for {model}"
+        )
+
     if model_origin is None:
         model_origin = model
 
-    if inspect.isclass(model_origin):
+    if (
+        inspect.isclass(model_origin)
+        and model_origin is not UnionType
+        and not str(model_origin).startswith("typing.Union")
+    ) or model_origin is typing.Any:
         if unpacked is None:
             if not required:
                 return None
@@ -232,18 +297,6 @@ def deserialize_unpacked(
 
             if model_origin == typing.Any or isinstance(unpacked, model_origin):
                 return unpacked
-
-            if model_origin is UnionType and isinstance(model, UnionType):
-                possible_types = model.__args__
-                if NoneType in possible_types and unpacked is None:
-                    return None
-                for possible_type in possible_types:
-                    try:
-                        return deserialize_unpacked(
-                            unpacked, possible_type, validate=validate
-                        )
-                    except (TypeError, AttributeError, ValueError):
-                        pass
 
             try:
                 return model(unpacked)
@@ -283,9 +336,9 @@ def deserialize_unpacked(
 
 
 def unpackb(
-        data: bytes,
-        model: type | BaseModel | None = None,
-        option: int | None = None,
+    data: bytes,
+    model: type | BaseModel | None = None,
+    option: int | None = None,
 ):
     unpacked = ormsgpack.unpackb(data, option=option)
     return deserialize_unpacked(unpacked, model)
@@ -327,7 +380,6 @@ def bytes_to_base_model(data: bytes) -> BaseModel:
     model = _get_component_registry().get(component_name)
     if model is None:
         component_registry = _get_component_registry()
-        print("Available components:", list(component_registry.keys()))
         raise ValueError(f"Unknown component name: {component_name}")
 
     return unpackb(packed_data, model=model)

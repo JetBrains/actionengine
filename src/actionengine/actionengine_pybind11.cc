@@ -17,6 +17,7 @@
 #include <Python.h>
 #include <absl/debugging/failure_signal_handler.h>
 #include <opentelemetry/nostd/shared_ptr.h>
+#include <opentelemetry/trace/tracer_provider.h>
 #include <pybind11/cast.h>
 #include <pybind11/detail/common.h>
 #include <pybind11/pybind11.h>
@@ -43,10 +44,83 @@ class type_caster<std::unique_ptr<act::ChunkStore>>
 
 namespace act {
 
+static absl::StatusOr<
+    opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>>
+InitializeOTelProvider() {
+  std::string otel_endpoint;
+  std::string otel_auth_header;
+
+  if (const char* absl_nullable otel_endpoint_env =
+          std::getenv("ACTIONENGINE_OTEL_ENDPOINT")) {
+    otel_endpoint = otel_endpoint_env;
+  }
+
+  if (!otel_endpoint.empty()) {
+    if (const char* absl_nullable otel_auth_header_env =
+            std::getenv("ACTIONENGINE_OTEL_AUTH_HEADER")) {
+      otel_auth_header = otel_auth_header_env;
+    }
+    if (otel_auth_header.empty()) {
+      LOG(WARNING) << "ACTIONENGINE_OTEL_AUTH_HEADER is not set, "
+                   << "OTLP exporter will not be initialized.";
+      return opentelemetry::nostd::shared_ptr<
+          opentelemetry::trace::TracerProvider>(nullptr);
+    }
+  }
+
+  if (const char* absl_nullable langfuse_base_url_env =
+          std::getenv("LANGFUSE_BASE_URL")) {
+    otel_endpoint = langfuse_base_url_env;
+  }
+  if (otel_endpoint.empty()) {
+    LOG(WARNING)
+        << "Neither ACTIONENGINE_OTEL_AUTH_HEADER, nor "
+           "LANGFUSE_BASE_URL is set, OTLP exporter will not be initialized.";
+    return opentelemetry::nostd::shared_ptr<
+        opentelemetry::trace::TracerProvider>(nullptr);
+  }
+  otel_endpoint += "/api/public/otel/v1/traces";
+  std::string langfuse_public_key;
+  if (const char* absl_nullable langfuse_public_key_env =
+          std::getenv("LANGFUSE_PUBLIC_KEY")) {
+    langfuse_public_key = langfuse_public_key_env;
+  }
+  if (langfuse_public_key.empty()) {
+    LOG(WARNING) << "LANGFUSE_PUBLIC_KEY is not set, "
+                 << "OTLP exporter will not be initialized.";
+    return opentelemetry::nostd::shared_ptr<
+        opentelemetry::trace::TracerProvider>(nullptr);
+  }
+
+  std::string langfuse_secret_key;
+  if (const char* absl_nullable langfuse_secret_key_env =
+          std::getenv("LANGFUSE_SECRET_KEY")) {
+    langfuse_secret_key = langfuse_secret_key_env;
+  }
+  if (langfuse_secret_key.empty()) {
+    LOG(WARNING) << "LANGFUSE_SECRET_KEY is not set, "
+                 << "OTLP exporter will not be initialized.";
+    return opentelemetry::nostd::shared_ptr<
+        opentelemetry::trace::TracerProvider>(nullptr);
+  }
+
+  otel_auth_header =
+      "Basic " + absl::Base64Escape(absl::StrCat(langfuse_public_key, ":",
+                                                 langfuse_secret_key));
+  return act::telemetry::GetHttpTracerProvider(otel_endpoint, otel_auth_header);
+}
+
 PYBIND11_MODULE(_C, m) {
   absl::InstallFailureSignalHandler({});
-  act::telemetry::SetGlobalTracerProvider(
-      act::telemetry::GetHttpTracerProvider());
+  absl::StatusOr<
+      opentelemetry::nostd::shared_ptr<opentelemetry::trace::TracerProvider>>
+      http_tracer_provider = InitializeOTelProvider();
+  if (!http_tracer_provider.ok()) {
+    LOG(WARNING) << "Failed to initialize HTTP tracer provider: "
+                 << http_tracer_provider.status();
+  } else if (*http_tracer_provider) {
+    act::telemetry::SetGlobalTracerProvider(*http_tracer_provider);
+  }
   if (!pybind11::google::internal::IsStatusModuleImported()) {
     py::module_::import("actionengine.status");
     // importing under a custom path/name, so just in case check that the

@@ -1,4 +1,4 @@
-FROM ubuntu:24.04 AS buildtime
+FROM --platform=linux/amd64 ubuntu:24.04 AS buildtime
 
 ARG TARGETARCH
 
@@ -97,27 +97,34 @@ RUN pyenv install ${PYTHON_VERSION} && \
 
 # ---- Build dependencies and some runtime tools
 
-USER root
-COPY --chown=actionengine:actionengine ./.git /opt/actionengine/actionengine/.git
 USER actionengine
-RUN cd /opt/actionengine/actionengine && \
+RUN cd /opt/actionengine && git clone https://github.com/JetBrains/actionengine.git && \
+    cd /opt/actionengine/actionengine && \
     git submodule update --init --recursive
 
 # ---- Build Proxygen (would be great to refactor into a build step: it's long!)
 USER root
-COPY --chown=actionengine:actionengine ./third_party/proxygen /opt/actionengine/actionengine/third_party/proxygen
+RUN apt-get update && apt-get install -y --no-install-recommends sudo && \
+        apt clean && \
+        rm -rf /var/lib/apt/lists/*
 RUN cd /opt/actionengine/actionengine/third_party/proxygen/proxygen && \
     ./build.sh
 RUN cd /opt/actionengine/actionengine/third_party/proxygen/proxygen && \
     ./install.sh
 
+ARG CMAKE_BUILD_TYPE=Release
+ENV CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+
+USER actionengine
+
+RUN cd /opt/actionengine/actionengine && \
+    git config --global --add safe.directory /opt/actionengine/actionengine && \
+    ./scripts/configure.sh
+
 # ---- Build Action Engine in unpriviledged mode
 
 COPY --chown=actionengine:actionengine . /opt/actionengine/actionengine
 USER actionengine
-
-ARG CMAKE_BUILD_TYPE=Release
-ENV CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
 
 WORKDIR /opt/actionengine/actionengine
 
