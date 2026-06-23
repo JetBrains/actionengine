@@ -207,8 +207,8 @@ class LLMTool:
         if len(chunked_output) == 0:
             return []
 
-        if len(chunked_output) == 1:
-            return chunked_output[0]
+        # if len(chunked_output) == 1:
+        #     return chunked_output[0]
 
         output_type = self._action_schema.get_python_type_for_port(output_name)
         if (

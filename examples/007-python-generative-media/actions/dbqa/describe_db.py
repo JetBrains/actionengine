@@ -12,6 +12,7 @@ from actionengine.sdk.llm_tool_runner import (
 from .answer_question_schema import ANSWER_QUESTION_SCHEMA
 from .answer_question import answer_question
 from .logging import get_logger
+from ..memory.data_types import ActionName as MemoryActionName
 
 _LOGGER = get_logger()
 _CACHED_DB_DESCRIPTIONS: dict[str, str] = {}
@@ -62,7 +63,17 @@ async def describe_db(action: actionengine.Action):
             .bind_handler(answer_question)
             .bind_registry(action.get_registry())
         )
-        set_allowed_tools(produce_answer, ("execute_query", "validate_query"))
+        set_allowed_tools(
+            produce_answer,
+            (
+                "execute_query",
+                "validate_query",
+                MemoryActionName.MEMORIES_CREATE,
+                MemoryActionName.MEMORIES_SEARCH,
+                MemoryActionName.SCHEMAS_SEARCH,
+                MemoryActionName.SCHEMAS_GET,
+            ),
+        )
         if span_id := action.get_header("span_id", decode=True):
             produce_answer.set_header("parent_span_id", span_id)
         produce_answer.run()

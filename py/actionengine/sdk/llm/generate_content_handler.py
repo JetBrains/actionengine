@@ -14,6 +14,7 @@
 
 import asyncio
 import os
+import traceback
 
 from actionengine.actions import Action
 from actionengine.data import to_chunk
@@ -45,7 +46,7 @@ async def generate_content(action: Action):
     )
     logger.info("started.")
 
-    api_key = await action["api_key"].consume(timeout=3.0)
+    api_key = await action["api_key"].consume(timeout=300.0)
     if not api_key:
         await action["output"].put_and_finalize("API key is required.")
         return
