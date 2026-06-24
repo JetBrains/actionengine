@@ -72,8 +72,8 @@ Fiber::Fiber(Unstarted, InvocableWork work, TreeOptions&&)
 void Fiber::Start() {
   EnsureWorkerThreadPool();
 
-  // EnsureThreadHasScheduler<InstrumentedRoundRobin>();
-  EnsureThreadHasScheduler<boost::fibers::algo::shared_work>(/*suspend=*/true);
+  EnsureThreadHasScheduler<InstrumentedRoundRobin>();
+  // EnsureThreadHasScheduler<boost::fibers::algo::shared_work>(/*suspend=*/true);
 
   auto body = [this]() {
     std::move(work_)();
